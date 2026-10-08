@@ -52,7 +52,7 @@ Each spike ends with its numbers and a verdict: it works, or exactly where in Ne
   intercepting routes, fonts, images and `public/` files.
 - **Memory.** Two real apps and their shell on one Zones: **291.6 MB RSS**, against 500.3 MB for three `next start`,
   with the same latency (p50 3.6–4.2 ms against 3.4–4.4 ms).
-- **Next's internals, checked.** Zones runs only on the Next versions the whole suite has passed on (16.3.6, 16.3.8). Before
+- **Next's internals, checked.** Zones runs only on the Next versions the whole suite has passed on (16.3.6, 16.3.7, 16.3.8, 16.4.0). Before
   anything is hooked, it checks every module and function it relies on, and hooks each module by its file, whatever
   path Next requires it by; otherwise it refuses to start and lists what moved (`contract.mjs`).
 - **Next's options are never changed.** `zoneConfig` passes a zone's Next config through as it is. Only in a build for

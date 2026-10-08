@@ -9,6 +9,8 @@ import path from "node:path";
 
 const cli = path.resolve("../../src/cli.mjs");
 const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "nz-init-")), "site");
+/* The workspace depends on this copy of next-zones, the code being checked, not the published one. */
+process.env.NEXT_ZONES_INIT_LOCAL = "1";
 const run = (args, cwd = path.dirname(dir)) => execFileSync(process.execPath, [cli, ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 const wrong = {};
 const result = {};

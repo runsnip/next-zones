@@ -167,9 +167,11 @@ the store in one rename. Nothing is uploaded to Zones. (A store can also be buil
 - **Two formats.** An image arrives as a `.tgz` (`next-zones pack`) or a `.zip` (`next-zones pack --out x.zip`,
   `build --pack --format zip`: the format of an image gateway's store), told apart by its first bytes. An archive whose
   files sit in one top-level folder, as a repository's archive of a tag does (`<repo>-<ref>/zone.json`), is unwrapped.
-- **Streamed.** A `.tgz` is unpacked as it arrives; a `.zip` is written to disk first (its list of files is at its
-  end), then read one file at a time, each checked against its CRC-32. Nothing holds the whole image in memory: a
-  300 MB image pulls at about 160–180 MB peak RSS, the same as a small one (see [the numbers](#the-numbers)).
+- **Streamed.** Both formats are unpacked as they arrive, with nothing spooled to disk. A `.zip`'s files are inflated
+  and written in parallel as the next ones arrive (up to 4 at once, 16 MB in flight), each checked against its CRC-32,
+  and its central directory, at its end, must agree with what was written. Nothing holds the whole image in memory: a
+  300 MB image pulls in about 0.3–0.4 s at 160 MB peak RSS as `.tgz`, 0.5 s at about 210 MB as `.zip` (see
+  [the numbers](#the-numbers)).
 - **Over a shared link.** A response that sends nothing for `stallMs` (30 s) is dropped, and a dropped or stalled
   response is resumed from the byte reached (`Range`, with `If-Range` so a changed file is never spliced), up to
   `retries` (3) times. Only the wait on the network counts toward a stall, not the time the disk takes. A server that
@@ -248,13 +250,13 @@ The 10 MB between 300 and 600 MB is garbage not yet collected, not the image: me
 ## Supported Next versions
 
 Zones works on Next's internals, so it runs only on the Next versions next-zones has been checked against (today
-16.3.6 and 16.3.8; 16.3.8 fixes security issues in Next, among them SSRF in the image optimizer and cache poisoning:
-use it). On any other version, or on a Next where a module or function it hooks has moved, `createZones` throws before
+16.3.6, 16.3.7, 16.3.8 and 16.4.0; 16.3.8 fixes security issues in Next, among them SSRF in the image optimizer and
+cache poisoning: use 16.3.8 or 16.4.0). On any other version, or on a Next where a module or function it hooks has moved, `createZones` throws before
 anything is hooked, and lists every difference:
 
 ```
-next-zones: this Next does not match what Zones relies on (next 16.4.0):
-  - Next 16.4.0 has not been checked with next-zones (checked: 16.3.6, 16.3.8); run tools/upgrade-guard.mjs 16.4.0, …
+next-zones: this Next does not match what Zones relies on (next 16.5.0):
+  - Next 16.5.0 has not been checked with next-zones (checked: 16.3.6, 16.3.7, 16.3.8, 16.4.0); run tools/upgrade-guard.mjs 16.5.0, …
 ```
 
 `createZones({ unsupportedNext: true })` runs anyway. It is meant for the upgrade guard, which runs the whole check

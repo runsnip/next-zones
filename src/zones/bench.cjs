@@ -26,7 +26,7 @@ function createBench(ctx, { staging, activation }) {
       const all = checker.dynamicRoutes.filter((r) => !r.page.startsWith("/pad")).concat(pads.map((pg) => ({ page: pg, match: getRouteMatcher(getRouteRegex(pg)) })));
       checker.dynamicRoutes = getSortedRoutes(all.map((r) => r.page)).map((pg) => all.find((r) => r.page === pg));
     }
-    for (const server of ctx.servers) { server.appPathsManifest = server.getAppPathsManifest(); server.appPathRoutes = server.getAppPathRoutes(); await server.reloadMatchers(); }
+    for (const server of ctx.servers) { server.appPathsManifest = server.getAppPathsManifest(); server.appPathRoutes = server.getAppPathRoutes(); await server.reloadMatchers?.(); }
     const builds = await Promise.all(versions.map((v) => staging.stage(zone, path.join(ctx.store, zone, v))));
     const samples = [];
     for (let r = 0; r < runs; r++) {

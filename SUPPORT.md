@@ -1,6 +1,6 @@
 # What next-zones supports, and how
 
-Next 16.3.8 and 16.3.6, App Router, production server, live-installed zones (Zones). Each area of Next is listed from Next's own
+Next 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router, production server, live-installed zones (Zones). Each area of Next is listed from Next's own
 API reference (`next/dist/docs/01-app/03-api-reference`).
 
 **Status**
@@ -146,7 +146,7 @@ They are kept here to see later whether next-zones should improve on them.
 | A zone image enters the store by a pull only | ✅ `pull.mjs`, `endpoints.mjs`, `test/store.test.mjs` | From Zones' sources (`fromHttp`, `fromDirectory`, or one's own), streamed into a folder beside the store, checked (zone, version, integrity), then moved in by one rename; refused otherwise, store unchanged. No endpoint takes an image: `PUT` answers 405 |
 | Pulls on a ping (live pulls) | ✅ `pull.mjs` | Only for a zone with `zoneConfig({ livePull: true })`, read from its latest stored image before anything is fetched; the pulled image must declare it too. A zone's first image is pulled server side (`next-zones pull`) |
 | Pulling an image of hundreds of MB | ✅ `tools/bench/pull.mjs` | Unpacked as it arrives (a streaming tar reader): peak memory does not grow with the image. 300 MB image (180 MB packed): 154 MB peak RSS and 3.1 s, against 756 MB and 7.0 s when the archive was held in memory; 600 MB: 164 MB, 6.8 s |
-| Images as .zip, and a repository's archive of a tag | ✅ `test/transfer.test.mjs` | Told from .tgz by the first bytes; spooled to disk, read from the central directory one file at a time, each CRC-32 checked; one top-level folder unwrapped (`git archive --prefix`); Zip64 refused. 300 MB: 176 MB peak RSS |
+| Images as .zip, and a repository's archive of a tag | ✅ `test/transfer.test.mjs` | Told from .tgz by the first bytes; read as it arrives, nothing spooled to disk: small files inflated and written in parallel (4 at once, 16 MB in flight), each CRC-32 checked, and the central directory must agree with what was written; one top-level folder unwrapped (`git archive --prefix`); Zip64 refused. 300 MB: 0.5 s at about 210 MB peak RSS (before: 0.9 s at 185 MB, and 174 MB of disk for the spooled copy) |
 | A pull over a shared link: stalls, dropped connections | ✅ `test/transfer.test.mjs` | `stallMs` (30 s, network waits only), resumed with `Range` and `If-Range` up to `retries` (3); a server that cannot resume fails the pull |
 | service-connector as the source | ✅ `test/transfer.test.mjs` (against its documented API) | `fromConnector`: `GET /api/connector/images/zones/<owner>/<zone>@<version>` with a bearer token; refusals carry their reason |
 | The disk during a pull | ✅ `test/store.test.mjs` | `minFree` (1 GiB) left free: the size is estimated from the zone's latest image, the store pruned when short, the pull refused if it still does not fit; the free space is read every 250 ms while it runs, and the pull stops below `minFree`, leaving nothing behind |

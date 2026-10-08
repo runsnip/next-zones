@@ -7,6 +7,7 @@ import path from "node:path";
 import http from "node:http";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { Readable } from "node:stream";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -61,6 +62,46 @@ test("a .zip entry that leaves its folder is refused", async () => {
     fs.writeFileSync(file, Buffer.from(bytes.toString("latin1").replaceAll("aaaaaaaa", "../xxxxx"), "latin1"));
     await assert.rejects(unpackZoneImage(file, into), /leaves its folder/);
   } finally { for (const d of [dir, out, path.dirname(into)]) fs.rmSync(d, { recursive: true, force: true }); }
+});
+
+/** The bytes of `file` as a stream of `size`-byte pieces, so every boundary falls somewhere new. */
+const pieces = (file, size) => Readable.from((function* () { const b = fs.readFileSync(file); for (let i = 0; i < b.length; i += size) yield b.subarray(i, i + size); })());
+
+test("a .zip arriving in small pieces unpacks as it arrives, nothing spooled beside the folder", async () => {
+  const dir = zoneImage(), small = temp(), out = temp(), parent = temp();
+  try {
+    /* Pieces of 7 bytes on a small image (every boundary: headers, deflate streams, data descriptors), larger on the big one. */
+    fs.writeFileSync(path.join(small, "zone.json"), "{}");
+    fs.mkdirSync(path.join(small, "server"));
+    fs.writeFileSync(path.join(small, "server", "a.js"), "module.exports = 1;\n".repeat(400));
+    fs.writeFileSync(path.join(small, "server", "b.bin"), crypto.randomBytes(3000));
+    fs.symlinkSync("a.js", path.join(small, "server", "link"));
+    const smallFile = await packZoneImage(small, path.join(out, "small.zip")), file = await packZoneImage(dir, path.join(out, "a.zip"));
+    for (const [from, image, size] of [[smallFile, small, 7], [file, dir, 4096], [file, dir, 1 << 20]]) {
+      const into = path.join(parent, `x${size}`);
+      await unpackZoneImage(pieces(from, size), into);
+      assert.equal(digestBuild(into).digest, digestBuild(image).digest, `pieces of ${size}`);
+      assert.ok(fs.lstatSync(path.join(into, "server", "link")).isSymbolicLink());
+    }
+    assert.deepEqual(fs.readdirSync(parent).filter((f) => f.endsWith(".zip")), []);
+  } finally { for (const d of [dir, small, out, parent]) fs.rmSync(d, { recursive: true, force: true }); }
+});
+
+test("a .zip whose central directory disagrees with its entries, or that is cut short, is refused", async () => {
+  const dir = temp(), out = temp(), parent = temp();
+  try {
+    fs.writeFileSync(path.join(dir, "zone.json"), "{}");
+    fs.writeFileSync(path.join(dir, "a.js"), "x".repeat(5000));
+    const file = await packZoneImage(dir, path.join(out, "a.zip"));
+    const bytes = fs.readFileSync(file);
+    /* The central directory's CRC-32 of the first entry (at offset 16 of its record) changed. */
+    const cd = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]), bytes.length - 1);
+    const first = bytes.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    const bad = Buffer.from(bytes); bad[first + 16] ^= 0xff;
+    await assert.rejects(unpackZoneImage(bad, path.join(parent, "a")), /central directory disagrees/);
+    assert.ok(cd > 0);
+    await assert.rejects(unpackZoneImage(bytes.subarray(0, Math.floor(bytes.length / 2)), path.join(parent, "b")), /corrupt/);
+  } finally { for (const d of [dir, out, parent]) fs.rmSync(d, { recursive: true, force: true }); }
 });
 
 /** A server for one archive: `misbehave(req, res, body)` may drop or stall a response; Range and ETag as asked. */

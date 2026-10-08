@@ -124,8 +124,9 @@ function identities(groups) {
   return out;
 }
 
-/* A chunk's module groups ([{ ids, source }]), from running it in a sandbox where TURBOPACK.push collects them. A
-   chunk that is not in that format (a polyfill bundle) registers no module, and has none. */
+/* A chunk's module groups ([{ ids, source, strict }]), from running it in a sandbox where TURBOPACK.push collects them.
+   A chunk that is not in that format (a polyfill bundle) registers no module, and has none. From Next 16.4 a chunk's
+   strict factories come first, as a nested array, made inside one "use strict" scope (strict: true). */
 function chunkGroups(file) {
   const pushed = [];
   const sandbox = { TURBOPACK: { push: (items) => pushed.push(items) }, document: undefined };
@@ -133,12 +134,14 @@ function chunkGroups(file) {
   try { vm.runInNewContext(fs.readFileSync(file, "utf8"), sandbox, { filename: file, timeout: 5000 }); }
   catch { if (!pushed.length) return []; }
   const groups = [];
-  for (const items of pushed) {
+  const collect = (items, strict) => {
     let ids = [];
-    for (const item of items.slice(1)) {
-      if (typeof item === "function") { groups.push({ ids, source: item.toString() }); ids = []; } else ids.push(item);
+    for (const item of items) {
+      if (Array.isArray(item)) collect(item, true);
+      else if (typeof item === "function") { groups.push({ ids, source: item.toString(), strict }); ids = []; } else ids.push(item);
     }
-  }
+  };
+  for (const items of pushed) collect(items.slice(1), false);
   return groups;
 }
 const chunksOf = (root) => fs.readdirSync(path.join(root, "static", "chunks")).filter((f) => f.endsWith(".js") && !isRuntime(f));
@@ -186,6 +189,17 @@ const writeAtomic = (file, text) => {
   fs.writeFileSync(temp, text);
   fs.renameSync(temp, file);
 };
+/* A chunk file for some groups: one push of ids then factory, each group. Strict factories stay strict, as Next 16.4
+   writes them: a chunk of strict factories only is one "use strict" scope around a flat push (a push of two items is
+   read as the chunk's registration, not as modules); a mixed one makes them in a "use strict" scope, first, as the
+   nested array the runtime reads. */
+const PUSH = (items) => `(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,${items.join(",")}]);`;
+const chunkSource = (groups, sourceOf) => {
+  const itemsOf = (list) => list.flatMap((g) => [...g.ids.map((id) => JSON.stringify(idMap[id] ?? id)), sourceOf(g)]);
+  const strict = itemsOf(groups.filter((g) => g.strict)), loose = itemsOf(groups.filter((g) => !g.strict));
+  if (!loose.length) return `(()=>{"use strict";${PUSH(strict)}})();\n`;
+  return `${PUSH((strict.length ? [`(()=>{"use strict";return[${strict.join(",")}]})()`] : []).concat(loose))}\n`;
+};
 /* Each required id rewritten where the parse found it: the original ids stay what the analysis below follows. */
 const remapSource = (g) => remapRequires(g.source, read(g).requires, idMap);
 if (conflicting.size) {
@@ -194,8 +208,7 @@ if (conflicting.size) {
     const touched = c.groups.some((g) => g.ids.some((id) => idMap[id] !== undefined) || requiredBy(g).some((d) => idMap[d] !== undefined));
     if (!touched) continue;
     const renamed = c.file.replace(/\.js$/, `-z${buildKey.slice(0, 8)}.js`);
-    const items = c.groups.flatMap((g) => [...g.ids.map((id) => JSON.stringify(idMap[id] ?? id)), remapSource(g)]);
-    writeAtomic(path.join(outDir, renamed), `(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,${items.join(",")}]);\n`);
+    writeAtomic(path.join(outDir, renamed), chunkSource(c.groups, remapSource));
     chunkMap[`static/chunks/${c.file}`] = `static/chunks/${renamed}`;
     for (const g of c.groups) g.output = remapSource(g);
   }
@@ -219,7 +232,7 @@ while (pending.length) {
     if (d && !lacking.has(d) && mainGroups.includes(d) && d.ids.some((id) => !shellMain.has(String(id)) || idMap[id] !== undefined)) pending.push(d);
   }
 }
-const mainItems = lacking.size ? [...lacking].flatMap((g) => [...g.ids.map((id) => JSON.stringify(idMap[id] ?? id)), g.output ?? g.source]) : null;
+const mainSource = lacking.size ? chunkSource([...lacking], (g) => g.output ?? g.source) : null;
 
 /* 5. What the zone's code uses on its module context that the shell's runtime does not give it. Each build's runtime is
    trimmed to what that build uses, and a document has one runtime, the shell's. The shell's context is read from the
@@ -261,5 +274,5 @@ const shellRuntimeFile = shellBuild.rootMainFiles?.find(isRuntime);
   const zoneModules = {};
   for (const [id, h] of zoneIds) (zoneModules[idMap[id] ?? id] ??= []).push(h);
   saveReads();
-  parentPort.postMessage({ idMap, chunkMap, mainItems, missingUsed, zoneModules, shellModules });
+  parentPort.postMessage({ idMap, chunkMap, mainSource, missingUsed, zoneModules, shellModules });
 })().catch((error) => setImmediate(() => { throw error; }));

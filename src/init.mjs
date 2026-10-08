@@ -18,7 +18,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 /* The versions next-zones is checked against. */
-const NEXT = "16.3.8", REACT = "19.3.0";
+const NEXT = "16.4.0", REACT = "19.3.0";
 const PACKAGE_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const SEGMENT = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -27,10 +27,11 @@ function packageManager() {
   return ["pnpm", "yarn", "bun"].find((pm) => agent.startsWith(pm)) ?? "npm";
 }
 
-/* The dependency on next-zones: the published version, or this copy before the first publish. */
+/* The dependency on next-zones: the published version, or this copy (before the first publish, or with
+   NEXT_ZONES_INIT_LOCAL=1, as the checks run it on the code being changed). */
 function nextZonesSpec() {
   const own = JSON.parse(fs.readFileSync(path.join(PACKAGE_DIR, "package.json"), "utf8"));
-  return own.private ? `file:${PACKAGE_DIR}` : `^${own.version}`;
+  return own.private || process.env.NEXT_ZONES_INIT_LOCAL === "1" ? `file:${PACKAGE_DIR}` : `^${own.version}`;
 }
 
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;

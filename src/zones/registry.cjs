@@ -13,8 +13,11 @@
 const Module = require("node:module");
 const crypto = require("node:crypto");
 
-const RUNTIME_CACHE = "const moduleFactories = new Map();\nconst moduleCache = Object.create(null);";
-const OVERWRITTEN = "function getOverwrittenModule(moduleCache, id) {\n    let module = moduleCache[id];";
+/* The two runtime layouts: up to Next 16.3 the cache is a plain object, from 16.4 a Map. */
+const LAYOUTS = [
+  { kind: "object", cache: "const moduleFactories = new Map();\nconst moduleCache = Object.create(null);", overwritten: "function getOverwrittenModule(moduleCache, id) {\n    let module = moduleCache[id];" },
+  { kind: "map", cache: "const moduleFactories = new Map();\nconst moduleCache = new Map();", overwritten: "function getOverwrittenModule(moduleCache, id) {\n    let module = moduleCache.get(id);" },
+];
 
 function installModuleRegistry(ctx) {
   const registry = new Map();                          // `${id}:${sha1}` → module
@@ -47,9 +50,40 @@ function installModuleRegistry(ctx) {
     const key = keyOf(cache[FACTORIES], id);
     if (key) { hoistedKeys.add(key); registry.delete(key); owners.delete(key); }
     const own = cache[OWN];
+    if (own instanceof Map) {
+      if (cache[BORROWED].has(String(id))) { cache[BORROWED].delete(String(id)); own.delete(id); }
+      return own.get(id);
+    }
     if (cache[BORROWED].has(String(id))) { cache[BORROWED].delete(String(id)); delete own[id]; }
     return own[id];
   };
+  /* The Map layout (Next 16.4 on): the same lookups as the object layout's Proxy, through get and set. */
+  class SharedMap extends Map {
+    constructor(factories, runtimeFile) {
+      super();
+      this[OWN] = this;
+      this[BORROWED] = new Set();
+      this[FACTORIES] = factories;
+      this.runtimeFile = runtimeFile;
+    }
+    get(id) {
+      const mine = super.get(id);
+      if (mine !== undefined) return mine;
+      const key = keyOf(this[FACTORIES], id);
+      if (!key || hoistedKeys.has(key)) return undefined;
+      const shared = registry.get(key);
+      if (shared) { super.set(id, shared); this[BORROWED].add(String(id)); stats.shared++; }
+      return shared;
+    }
+    has(id) { return this.get(id) !== undefined; }
+    set(id, module) {
+      super.set(id, module);
+      const key = keyOf(this[FACTORIES], id);
+      if (key && !hoistedKeys.has(key) && !registry.has(key)) { registry.set(key, module); owners.set(key, this.runtimeFile); stats.instantiated++; }
+      return this;
+    }
+  }
+  globalThis.__NEXT_ZONES_MODULE_MAP__ = (factories, runtimeFile = "") => new SharedMap(factories, runtimeFile);
   globalThis.__NEXT_ZONES_MODULE_CACHE__ = (factories, runtimeFile = "") => {
     const own = Object.create(null);
     const borrowed = new Set();
@@ -80,12 +114,12 @@ function installModuleRegistry(ctx) {
   const compile = Module.prototype._compile;
   Module.prototype._compile = function (content, filename) {
     if (filename.endsWith("[turbopack]_runtime.js")) {
-      if (!content.includes(RUNTIME_CACHE) || !content.includes(OVERWRITTEN)) {
-        throw new Error(`next-zones: unknown Turbopack runtime layout in ${filename} (is this Next version supported?)`);
-      }
+      const layout = LAYOUTS.find((l) => content.includes(l.cache) && content.includes(l.overwritten));
+      if (!layout) throw new Error(`next-zones: unknown Turbopack runtime layout in ${filename} (is this Next version supported?)`);
+      const create = layout.kind === "map" ? "__NEXT_ZONES_MODULE_MAP__" : "__NEXT_ZONES_MODULE_CACHE__";
       content = content
-        .replace(RUNTIME_CACHE, "const moduleFactories = new Map();\nconst moduleCache = globalThis.__NEXT_ZONES_MODULE_CACHE__(moduleFactories, __filename);")
-        .replace(OVERWRITTEN, "function getOverwrittenModule(moduleCache, id) {\n    let module = globalThis.__NEXT_ZONES_OWN_MODULE__(moduleCache, id);");
+        .replace(layout.cache, `const moduleFactories = new Map();\nconst moduleCache = globalThis.${create}(moduleFactories, __filename);`)
+        .replace(layout.overwritten, "function getOverwrittenModule(moduleCache, id) {\n    let module = globalThis.__NEXT_ZONES_OWN_MODULE__(moduleCache, id);");
     }
     return compile.call(this, content, filename);
   };

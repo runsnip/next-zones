@@ -9,7 +9,8 @@
  * - instrumentation-globals.external and NextNodeServer: onRequestError dispatched to the shell and the zone;
  * - router-utils/filesystem: the router's appFiles also answer for the zones' routes, and the rule dispatchers go in;
  * - lru-cache: cached entries are dropped lazily by first path segment when a zone switches;
- * - NextNodeServer.getRouteMatchers: the server instance is kept, to swap its matchers;
+ * - NextNodeServer.getRouteMatchers (up to Next 16.3) or getAppPathRoutes (16.4 on, which has no route matchers and
+ *   matches from the server's appPathsManifest and appPathRoutes): the server instance is kept, for the switch;
  * - FileSystemCache.getFilePath: a zone's pages are read from, and revalidated into, its version's cache.
  */
 const { keptLRU, segmentOf } = require("./kept-lru.cjs");
@@ -76,29 +77,35 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
       /* Its cache is a plain Map by path: a zone's manifests are recorded so collect.cjs can clear them. */
       ctx.clearManifest = (file) => mod.clearManifestCache(file);
       const remember = (file) => { if (ctx.zoneDists.size) ctx.loadedManifests.add(file); };
+      /* A route's own manifest (its client reference manifest, its react-loadable manifest) read from the zone's build:
+         the build of the render asking (bindRenders), else the zones' active versions. */
+      const fromZone = (load, args) => {
+        if (typeof args?.manifest === "string" && args.manifest.startsWith("server/app/")) {
+          const build = renderBuild.getStore();
+          /* `build` is one of the two names stage.cjs gives a build's folder (as given, and its real path). */
+          const real = (dir) => { try { return fs.realpathSync(dir) + path.sep; } catch { return null; } };
+          const staged = build ? [...(ctx.staged?.values() ?? [])].find((z) => build === path.resolve(z.dist) + path.sep || build === real(z.dist)) : null;
+          for (const z of staged ? [staged] : ctx.zones.values()) {
+            for (const page of Object.keys(z.appPaths)) {
+              if (!args.manifest.startsWith(`server/app${page}`)) continue;
+              remember(path.join(z.dist, args.manifest));
+              const value = load({ ...args, projectDir: z.dist, distDir: "." });
+              return args.manifest.endsWith("_client-reference-manifest.js") ? manifests.withZoneMainChunks(value, z) : value;
+            }
+          }
+        }
+        return load(args);
+      };
       replacement = { ...mod,
         /* A route's own manifests (its client reference manifest, its react-loadable manifest) are read from the
            zone's build; the shared ones (routes, build, fonts) stay the shell's, with the zones merged in. */
         loadManifestFromRelativePath(args) {
           if (args?.manifest === "prerender-manifest.json") return manifests.withZonePrerenders(mod.loadManifestFromRelativePath(args));
           if (args?.manifest === "server/server-reference-manifest.json") return manifests.withZoneActions(mod.loadManifestFromRelativePath(args));
-          if (typeof args?.manifest === "string" && args.manifest.startsWith("server/app/")) {
-            /* The build of the render asking (above), else the zones' active versions. */
-            const build = renderBuild.getStore();
-            /* `build` is one of the two names stage.cjs gives a build's folder (as given, and its real path). */
-            const real = (dir) => { try { return fs.realpathSync(dir) + path.sep; } catch { return null; } };
-            const staged = build ? [...(ctx.staged?.values() ?? [])].find((z) => build === path.resolve(z.dist) + path.sep || build === real(z.dist)) : null;
-            for (const z of staged ? [staged] : ctx.zones.values()) {
-              for (const page of Object.keys(z.appPaths)) {
-                if (!args.manifest.startsWith(`server/app${page}`)) continue;
-                remember(path.join(z.dist, args.manifest));
-                const value = mod.loadManifestFromRelativePath({ ...args, projectDir: z.dist, distDir: "." });
-                return args.manifest.endsWith("_client-reference-manifest.js") ? manifests.withZoneMainChunks(value, z) : value;
-              }
-            }
-          }
-          return mod.loadManifestFromRelativePath(args);
+          return fromZone(mod.loadManifestFromRelativePath, args);
         },
+        /* Next 16.4 on reads a route's client reference manifest with a function of its own. */
+        ...(typeof mod.evalManifestFromRelativePath === "function" ? { evalManifestFromRelativePath: (args) => fromZone(mod.evalManifestFromRelativePath, args) } : {}),
         loadManifest(p, ...rest) {
           const value = mod.loadManifest(p, ...rest);
           if (p.endsWith(`${path.sep}prerender-manifest.json`)) return manifests.withZonePrerenders(value);
@@ -147,13 +154,24 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
     return instrumentation.dispatchRequestError(() => onRequestError.call(this, err, req, context), err, { path: req?.url }, context);
   };
   const getRouteMatchers = NextNodeServer.prototype.getRouteMatchers;
-  NextNodeServer.prototype.getRouteMatchers = function () {
-    ctx.servers.add(this);
-    const matchers = getRouteMatchers.call(this);
-    expect(Array.isArray(matchers?.providers) && Array.isArray(matchers?.matchers?.static) && Array.isArray(matchers?.matchers?.dynamic),
-      "the server's route matchers have providers and matchers { static, dynamic } as arrays");
-    return matchers;
-  };
+  if (typeof getRouteMatchers === "function") {
+    NextNodeServer.prototype.getRouteMatchers = function () {
+      ctx.servers.add(this);
+      const matchers = getRouteMatchers.call(this);
+      expect(Array.isArray(matchers?.providers) && Array.isArray(matchers?.matchers?.static) && Array.isArray(matchers?.matchers?.dynamic),
+        "the server's route matchers have providers and matchers { static, dynamic } as arrays");
+      return matchers;
+    };
+  } else {
+    /* Next 16.4 on: routes are matched from appPathsManifest and appPathRoutes, which the switch assigns. */
+    expect(typeof NextNodeServer.prototype.getRouteMatch === "function" && typeof NextNodeServer.prototype.getRouteDefinitions === "function",
+      "NextNodeServer matches routes with getRouteMatchers, or with getRouteMatch over getRouteDefinitions");
+    const getAppPathRoutes = NextNodeServer.prototype.getAppPathRoutes;
+    NextNodeServer.prototype.getAppPathRoutes = function () {
+      ctx.servers.add(this);
+      return getAppPathRoutes.call(this);
+    };
+  }
 
   /* The incremental cache's files. The page runtime is bundled with its own FileSystemCache, out of reach, so Zones
      installs Next's own (from dist) through the public cacheHandler option (zones-cache-handler.cjs). */

@@ -114,7 +114,7 @@ function createServer(ctx, { assets, installer, bench, collector }) {
     handle = app.getRequestHandler();
     await app.prepare();
     /* The hooks the switch needs took hold as Next started: its server, its router's fs checker, its manifests. */
-    expect(ctx.servers.size > 0, "NextNodeServer.getRouteMatchers was not called as the server started");
+    expect(ctx.servers.size > 0, "NextNodeServer.getRouteMatchers (or, from Next 16.4, getAppPathRoutes) was not called as the server started");
     expect(ctx.fsCheckers.size > 0, "the router's setupFsCheck was not called as the server started");
     for (const name of ["loadManifest", "filesystem", "lruCache"]) expect(ctx.hookedModules?.has(name), `${name} was not loaded through Zones' hooks`);
     for (const server of ctx.servers) {

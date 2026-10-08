@@ -4,7 +4,7 @@
  * Zones's unexpected log errors. The base of the upgrade guard: run it before allowing a new Next version.
  *
  *   node check-all.mjs [check …]       (all checks by default; the builds must exist: build-zone.sh, next build)
- *   VERBOSE=1 prints a failed check's output, SHOW=1 every check's.
+ *   VERBOSE=1 prints a failed check's output, SHOW=1 every check's; a failed check's output and Zones' log are kept in check-logs/.
  */
 import { spawn, execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -105,6 +105,12 @@ for (const name of chosen) {
   if (!ok) failed++;
   console.log(`${ok ? "✓" : "✗"} ${name.padEnd(16)}${ok ? "" : ` exit ${code}${pageErrors ? ", page errors" : ""}${wrong ? ", wrong responses" : ""}${logErrors.length ? `, Zones log: ${logErrors.slice(0, 2).join(" | ")}` : ""}`}`);
   if ((!ok && process.env.VERBOSE) || process.env.SHOW) console.log(output.slice(0, 4000));
+  /* A failed check's output and Zones' log are kept, so a failure seen once can still be read (check-logs/). */
+  if (!ok) {
+    fs.mkdirSync("check-logs", { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    fs.writeFileSync(path.join("check-logs", `${name}-${stamp}.log`), `${output}\n--- zones.log ---\n${fs.existsSync("zones.log") ? fs.readFileSync("zones.log", "utf8") : ""}`);
+  }
 }
 console.log(failed ? `${failed} of ${chosen.length} failed` : `all ${chosen.length} passed`);
 process.exit(failed ? 1 : 0);

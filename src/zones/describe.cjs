@@ -14,7 +14,7 @@ const crypto = require("node:crypto");
 const { missingBuildOptions } = require("../build-options.cjs");
 
 /* The config keys that shape every URL or image, compared with the shell's at install. */
-const CONFIG_KEYS = ["basePath", "i18n", "trailingSlash", "assetPrefix", "skipTrailingSlashRedirect", "cacheComponents", "images"];
+const CONFIG_KEYS = ["basePath", "i18n", "trailingSlash", "assetPrefix", "skipTrailingSlashRedirect", "cacheComponents", "partialPrefetching", "images"];
 /* Bumped when what describeBuild() returns changes: a zone.json of another format is described again. */
 const FORMAT = 2;
 

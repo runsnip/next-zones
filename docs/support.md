@@ -1,6 +1,6 @@
 # What is supported
 
-Next.js 16.3.8 and 16.3.6, App Router. Key:
+Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router. Key:
 - ✅ works: verified in a browser or over HTTP;
 - 🟡 expected to work: not verified yet;
 - 🔧 planned;

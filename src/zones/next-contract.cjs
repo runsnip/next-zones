@@ -11,18 +11,19 @@
  * - What Zones reads on Next's objects at run time (the router's fs checker, the server's matchers) is checked where
  *   it is first met, with expect() below.
  */
-const SUPPORTED = ["16.3.6", "16.3.8"];
+const SUPPORTED = ["16.3.6", "16.3.7", "16.3.8", "16.4.0"];
 
 class NextContractError extends Error {}
 
-/* The files Zones hooks or calls into, and what it needs of each: [export path, "function" | "class" | method list]. */
+/* The files Zones hooks or calls into, and what it needs of each: [export path, "function" | "class" | method list].
+   A method entry "a|b+c" is met by a, or by b and c together (where Next changed between versions). */
 const MODULES = {
   loadManifest: ["next/dist/server/load-manifest.external", [["loadManifestFromRelativePath", "function"], ["loadManifest", "function"], ["clearManifestCache", "function"]]],
   imageOptimizer: ["next/dist/server/image-optimizer", [["fetchInternalImage", "function"]]],
   instrumentationGlobals: ["next/dist/server/lib/router-utils/instrumentation-globals.external", [["instrumentationOnRequestError", "function"]]],
   filesystem: ["next/dist/server/lib/router-utils/filesystem", [["setupFsCheck", "function"]]],
   lruCache: ["next/dist/server/lib/lru-cache", [["LRUCache", "class", ["set", "has", "get", "remove"]]]],
-  nextServer: ["next/dist/server/next-server", [["default", "class", ["instrumentationOnRequestError", "getRouteMatchers", "getAppPathsManifest"]]]],
+  nextServer: ["next/dist/server/next-server", [["default", "class", ["instrumentationOnRequestError", "getRouteMatchers|getRouteMatch+getRouteDefinitions+getAppPathRoutes", "getAppPathsManifest"]]]],
   fileSystemCache: ["next/dist/server/lib/incremental-cache/file-system-cache", [["default", "class", ["getFilePath"]]]],
   appPaths: ["next/dist/shared/lib/router/utils/app-paths", [["normalizeAppPath", "function"]]],
   routerUtils: ["next/dist/shared/lib/router/utils", [["getSortedRoutes", "function"]]],
@@ -71,7 +72,10 @@ function checkNext(ctx, located) {
       const value = mod?.[key];
       if (typeof value !== "function") { problems.push(`${file}: ${key} is ${value === undefined ? "missing" : `a ${typeof value}`}, a ${kind} was expected`); continue; }
       for (const method of methods) {
-        if (typeof value.prototype?.[method] !== "function") problems.push(`${file}: ${key}.prototype.${method} is missing`);
+        const has = (m) => typeof value.prototype?.[m] === "function";
+        if (!method.split("|").some((alt) => alt.split("+").every(has))) {
+          problems.push(`${file}: ${key}.prototype.${method.split("|").map((alt) => alt.split("+").join(" and ")).join(", or ")} ${method.includes("|") ? "are" : "is"} missing`);
+        }
       }
     }
   }

@@ -4,7 +4,7 @@
 one app: one origin, soft navigation between zones, one React. A new version of a zone can be loaded into the running
 server without a restart.
 
-> **Status: pre-release.** It targets Next.js **16.3.8** (and 16.3.6), App Router, production server.
+> **Status: pre-release.** It targets Next.js **16.4.0** and **16.3.8** (and 16.3.6, 16.3.7), App Router, production server.
 > - **Available:**
 >   - the zone declaration (`zoneConfig`);
 >   - the CLI: `init`, `add`, `check`, `doctor`, `dev`, `build`, `start`, `serve`, `install`, `pack`, `pull`, `prune`,

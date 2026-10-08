@@ -20,7 +20,7 @@ import { findZones, declarationProblems } from "./workspace.mjs";
 const CONFIG_FILES = ["next.config.mjs", "next.config.js", "next.config.ts", "next.config.mts"];
 const SHARED_PACKAGES = ["next", "react", "react-dom"];
 /* What shapes every URL, or every image: the shell's serves all zones (as stage.cjs checks on a build). */
-const SAME_AS_SHELL = ["basePath", "i18n", "trailingSlash", "assetPrefix", "skipTrailingSlashRedirect", "cacheComponents"];
+const SAME_AS_SHELL = ["basePath", "i18n", "trailingSlash", "assetPrefix", "skipTrailingSlashRedirect", "cacheComponents", "partialPrefetching"];
 const IMAGE_KEYS = ["remotePatterns", "domains", "localPatterns", "unoptimized", "dangerouslyAllowSVG", "dangerouslyAllowLocalIP"];
 /* Files a zone's app/ may hold at its top level besides its mount: used when it runs alone, the shell's on Zones. */
 const ROOT_ONLY = /^(layout|not-found|global-error|global-not-found|error|loading|template|default)\.(tsx|ts|jsx|js)$|\.(css|scss|sass)$/;

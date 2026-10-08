@@ -121,7 +121,7 @@ function createStaging(ctx) {
     if (info.missingBuildOptions.length) throw new ZoneError(`zone "${name}" ${identity.version} was not built for Zones (it lacks ${info.missingBuildOptions.join(", ")}): build it with next-zones build`);
     const imageDiffers = imageKeys.filter((key) => JSON.stringify(info.config.images?.[key] ?? null) !== JSON.stringify(shellNow.config.images?.[key] ?? null));
     if (imageDiffers.length) throw new ZoneError(`zone "${name}": images.${imageDiffers.join(", images.")} differ from the shell's, whose images config serves every zone: put them in the shell's next.config`);
-    const differs = ["basePath", "i18n", "trailingSlash", "assetPrefix", "skipTrailingSlashRedirect", "cacheComponents"]
+    const differs = ["basePath", "i18n", "trailingSlash", "assetPrefix", "skipTrailingSlashRedirect", "cacheComponents", "partialPrefetching"]
       .filter((key) => JSON.stringify(info.config[key] ?? null) !== JSON.stringify(shellNow.config[key] ?? null));
     if (differs.length) throw new ZoneError(`zone "${name}": ${differs.join(", ")} must equal the shell's (${differs.map((k) => `${k}: ${JSON.stringify(info.config[k])} vs ${JSON.stringify(shellNow.config[k])}`).join("; ")})`);
     const outside = routes.filter((r) => r !== mount && !r.startsWith(`${mount}/`));
@@ -166,7 +166,7 @@ function createStaging(ctx) {
     await fs.promises.rename(temp, file);
   }
 
-  const ANALYSIS = "m5";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
+  const ANALYSIS = "m6";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
   async function analyseZoneClient(staged) {
     const fingerprint = crypto.createHash("sha1").update(JSON.stringify([ANALYSIS, ctx.clientKnown ? [...ctx.clientKnown].map(([id, h]) => [id, [...h].sort()]).sort() : "shell"])).digest("hex").slice(0, 12);
     const base = path.join(ctx.cacheDir, staged.name, `${staged.buildKey}--${fingerprint}`);
@@ -183,13 +183,13 @@ function createStaging(ctx) {
       }
       result.mainChunkFile = null;
       result.mainChunks = [];
-      if (result.mainItems) {
+      if (result.mainSource) {
         result.mainChunkFile = `${base}-main.js`;
         await fs.promises.mkdir(path.dirname(result.mainChunkFile), { recursive: true });
-        await writeAtomic(result.mainChunkFile, `(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,${result.mainItems.join(",")}]);\n`);
+        await writeAtomic(result.mainChunkFile, result.mainSource);
         result.mainChunks = [`/_next/static/chunks/zone-${staged.name}-${staged.buildKey}-${fingerprint}-main.js`];
       }
-      delete result.mainItems;
+      delete result.mainSource;
       await fs.promises.mkdir(path.dirname(resultFile), { recursive: true });
       await writeAtomic(resultFile, JSON.stringify(result));
     }

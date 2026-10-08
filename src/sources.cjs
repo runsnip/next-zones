@@ -20,7 +20,7 @@ const path = require("node:path");
 const zlib = require("node:zlib");
 const { Readable } = require("node:stream");
 const { pipeline } = require("node:stream/promises");
-const { readZip, writeZip } = require("./zip.cjs");
+const { readZip, readZipStream, writeZip } = require("./zip.cjs");
 
 const BLOCK = 512;
 
@@ -192,9 +192,9 @@ async function unpackTgz(source, into, { signal } = {}) {
 
 /**
  * Unpacks a zone image into `into`: a .tgz (`next-zones pack`) or a .zip (service-connector's store, or a repository's
- * archive of a tag), told apart by their first bytes. `input` is a readable stream, a file path or a Buffer. A .tgz is
- * unpacked as it is read; a .zip is spooled to a file beside `into` first (its list of files is at its end) and read from
- * there, so neither holds the image in memory. An archive whose files sit in one top-level folder (a repository's
+ * archive of a tag), told apart by their first bytes. `input` is a readable stream, a file path or a Buffer. Both are
+ * unpacked as they are read, neither held in memory nor spooled to disk (a .zip's central directory, at its end, is
+ * checked against what was written). An archive whose files sit in one top-level folder (a repository's
  * archive: <repo>-<ref>/zone.json) is unwrapped. Every path must stay inside `into`, nothing is written through a link.
  * Resolves the bytes written.
  */
@@ -212,13 +212,7 @@ async function unpackZoneImage(input, into, { signal } = {}) {
   let written;
   if (first[0] === 0x1f && first[1] === 0x8b) written = await unpackTgz(rest, into, { signal });
   else if (first.readUInt32LE?.(0) === 0x04034b50 || (first[0] === 0x50 && first[1] === 0x4b)) {
-    const spool = `${path.resolve(into)}.zip`;
-    try {
-      await pipeline(rest, fs.createWriteStream(spool), { signal });
-      written = await readZip(spool, into, { signal });
-    } finally {
-      await fs.promises.rm(spool, { force: true });
-    }
+    written = await readZipStream(rest, into, { signal });
   } else {
     rest.destroy();
     throw new Error("the zone image is neither a .tgz nor a .zip");

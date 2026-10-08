@@ -36,12 +36,14 @@ function createActivation(ctx, { rules }) {
     let m0 = now();
     const mark = (name) => { if (marks) { const t1 = now(); marks[name] = (marks[name] ?? 0) + t1 - m0; m0 = t1; } };
     const server = ctx.servers.values().next().value;
-    const zoneMatchers = (await Promise.all(zoneProviders(server).map((p) => p.transform(staged.appPaths)))).flat();
+    /* Next 16.4 on has no route matchers: it matches from appPathsManifest and appPathRoutes, assigned below. */
+    const matched = Boolean(server.matchers);
+    const zoneMatchers = matched ? (await Promise.all(zoneProviders(server).map((p) => p.transform(staged.appPaths)))).flat() : [];
     m0 = now();
     const old = ctx.placed.get(staged.name);
     const keep = (m) => !old || !old.matchers.has(m);
-    const staticMatchers = server.matchers.matchers.static.filter(keep).concat(zoneMatchers.filter((m) => !m.isDynamic));
-    const baseDynamic = server.matchers.matchers.dynamic.filter(keep);
+    const staticMatchers = matched ? server.matchers.matchers.static.filter(keep).concat(zoneMatchers.filter((m) => !m.isDynamic)) : null;
+    const baseDynamic = matched ? server.matchers.matchers.dynamic.filter(keep) : [];
     mark("matchers");
     /* The zone's dynamic matchers in Next's order (getSortedRoutes on its own paths, which also checks them), merged
        into the rest, already in that order (route-order.cjs): O(n), not a sort of every route. */
@@ -117,8 +119,10 @@ function createActivation(ctx, { rules }) {
     for (const server of ctx.servers) {
       server.appPathsManifest = ctx.mergedManifest;
       server.appPathRoutes = plan.appPathRoutes;
-      server.matchers.matchers.static = plan.staticMatchers;
-      server.matchers.matchers.dynamic = plan.dynamicMatchers;
+      if (server.matchers) {
+        server.matchers.matchers.static = plan.staticMatchers;
+        server.matchers.matchers.dynamic = plan.dynamicMatchers;
+      }
       server._cachedPreviewManifest = undefined;          // re-read through the overlay on the next request
     }
     t.reloadMatchers += now() - s0; s0 = now();

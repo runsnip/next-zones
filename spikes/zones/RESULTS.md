@@ -858,3 +858,58 @@ during swaps, `/blog` answered 500 (4 to 136 times per run, in 4 runs of 6), wit
   version active when it asks.
 - After: 6 runs of 6 s per phase at 96 clients with four CPU-bound processes, about 17,000 requests and 54 swaps: no
   wrong answer, no error. `swapload.mjs` now runs at 64 clients.
+
+## Next 16.4.0, and 16.3.7
+
+**The guard:** `node tools/upgrade-guard.mjs <version>` on a fresh copy of this folder, one version after another
+(they share port 3900): 48/48 on 16.4.0, 16.3.8, 16.3.7 and 16.3.6 (Node 24.16.0, Apple M1).
+
+**What 16.4.0 changed under Zones**, each found by a check that failed, and handled for both versions:
+- **The server runtime's module cache is a `Map`** (`new Map()`, `get`/`set`), no longer an object: the registry gives
+  the Map layout a Map subclass with the same lookups (`registry.cjs`). The runtime was refused, as it should be, until
+  it was recognised.
+- **No route matchers.** `getRouteMatchers` and the matcher providers are gone; `getRouteMatch` rebuilds the route
+  definitions from `appPathsManifest` and `appPathRoutes` on each call. Zones already assigns both at a switch, so it
+  keeps the server by `getAppPathRoutes` (called in the constructor) and skips the matchers. The contract names
+  either form ("getRouteMatchers, or getRouteMatch and getRouteDefinitions and getAppPathRoutes").
+- **A route's client reference manifest is read by `evalManifestFromRelativePath`**, a function of its own: it is
+  routed to the zone's build like `loadManifestFromRelativePath`.
+- **Strict factories in client chunks:** a chunk's strict modules come first as a nested array, made in one
+  `"use strict"` scope; a chunk of strict modules only is one `"use strict"` scope around a flat push, because a push
+  of two items is read as the chunk's registration. Chunks Zones writes again (new ids, a zone's main chunk) keep both
+  forms (`zone-client.cjs`).
+- **`partialPrefetching`** is warned about when `cacheComponents` is on without it. It decides how the client router
+  prefetches, so a zone must set it as the shell does, like `cacheComponents` (`stage.cjs`, `doctor`).
+
+**Not measured yet:** the cost of 16.4's per-request route matching (definitions rebuilt and dynamic routes sorted on
+each call) against 16.3's matchers, with the 2036-route app of `activation.mjs`.
+
+## A .zip read as it arrives
+
+**Before:** a `.zip` was spooled to disk, then read from its central directory one file at a time.
+
+**Now** (`readZipStream`, `zip.cjs`): read from its local headers as it arrives, nothing spooled. Files of up to 2 MB
+are read whole and inflated and written in parallel while the next ones arrive (4 at once, 16 MB in flight); larger
+ones, and ones whose size comes after their data, stream through `inflateRaw`, which stops where its deflate stream
+ends (`bytesWritten` says where the next entry starts). The central directory, at the end, must agree with what was
+written (names, CRC-32, sizes); links are made from it, last. `writeZip` now puts each entry's sizes in its local
+header (written back at its position once the data is out), so every entry it writes can go the parallel way.
+
+**Measured** (`node tools/bench/pull.mjs --mb 300 --runs 5 --format zip --against HEAD`, a build-shaped 300 MB image,
+60% random bytes, served by a local HTTP server, each run a fresh process, median; Node 24.16.0, Apple M1, load
+average about 6 from other work, so ±0.1 s):
+
+| | time | peak RSS | disk beside the folder |
+|---|---|---|---|
+| `.zip`, spooled (before) | 0.9 s | 185 MB | 174 MB |
+| `.zip`, as it arrives, one file at a time | 0.8 s | 171 MB | 0 |
+| `.zip`, as it arrives, in parallel (now) | 0.5 s | 210 MB | 0 |
+| `.tgz` (for reference) | 0.3–0.4 s | 160 MB | 0 |
+
+- **Where the time went:** a CPU profile of the one-at-a-time reader was 67% idle: inflating and writing run on
+  libuv's thread pool, and one file at a time keeps one of its threads busy.
+- **The memory:** the 25 MB over the spooled reader does not follow the in-flight budget (16, 32 and 64 MB gave
+  211–214 MB) or the per-file limit (1, 2, 8 MB gave 196–218 MB): it is buffers of whole files churned faster than
+  the collector returns them.
+- **An earlier measurement was wrong:** `.tgz` 2.4 s and `.zip` 3.7 s were taken while the upgrade guard ran in the
+  background; the same code measured 0.3 s and 0.9 s on a quiet machine.
