@@ -1,0 +1,68 @@
+{
+  "name": "@runsnip/next-zones",
+  "version": "0.1.0",
+  "description": "Zones for Next.js: separately versioned apps composed into one Next app — one process, soft navigation across zones — and new zones loaded into a running server without a restart.",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Nguyễn Văn Cảnh",
+    "email": "hello@canhnguyen.vn",
+    "url": "https://canhnguyen.vn"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/runsnip/next-zones.git"
+  },
+  "homepage": "https://github.com/runsnip/next-zones#readme",
+  "keywords": [
+    "next",
+    "nextjs",
+    "zones",
+    "micro-frontends",
+    "app-router"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "next": "16.3.6 || 16.3.8"
+  },
+  "files": [
+    "src",
+    "dist",
+    "tsconfig",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "type": "module",
+  "exports": {
+    "./config": {
+      "types": "./src/config.d.mts",
+      "default": "./src/config.mjs"
+    },
+    "./client": {
+      "types": "./src/client.d.mts",
+      "default": "./src/client.mjs"
+    },
+    "./zones": {
+      "types": "./src/zones/index.d.cts",
+      "default": "./src/zones/index.cjs"
+    },
+    "./build": {
+      "types": "./src/build.d.mts",
+      "default": "./src/build.mjs"
+    },
+    "./tsconfig/zone.json": "./tsconfig/zone.json",
+    "./sources": {
+      "types": "./src/sources.d.cts",
+      "default": "./src/sources.cjs"
+    }
+  },
+  "bin": {
+    "next-zones": "./src/cli.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:zones": "node spikes/zones/check-all.mjs",
+    "test:upgrade": "node tools/upgrade-guard.mjs"
+  }
+}

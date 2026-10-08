@@ -1,0 +1,47 @@
+# next-zones
+
+**Zones for Next.js.** Build each part of a product as its own Next app, a *zone*, with its own version. Serve them as
+one app: one origin, soft navigation between zones, one React. A new version of a zone can be loaded into the running
+server without a restart.
+
+> **Status: pre-release.** It targets Next.js **16.3.8** (and 16.3.6), App Router, production server.
+> - **Available:**
+>   - the zone declaration (`zoneConfig`);
+>   - the CLI: `init`, `add`, `check`, `doctor`, `dev`, `build`, `start`, `serve`, `install`, `pack`, `pull`, `prune`,
+>     `watch`;
+>   - Zones (`createZones`), which installs and swaps zones at run time;
+>   - one combined build of every zone (`mode: "single"`, the composer);
+>   - `<ZoneUpdates />`.
+
+## Why
+
+Next.js has [Multi-Zones](https://nextjs.org/docs/app/guides/multi-zones):
+- every zone is a separate server;
+- moving between zones reloads the page and drops client state.
+
+next-zones keeps the separation (each zone builds, versions and deploys on its own) without those costs:
+
+| | Next Multi-Zones | next-zones |
+|---|---|---|
+| Moving between zones | hard navigation | **soft** `<Link>` navigation; client state kept |
+| Servers | one per zone | **one** for all zones |
+| A module shared by zones | loaded once per zone | loaded **once** |
+| Releasing a zone | redeploy its server | **install it live**, roll back in milliseconds |
+
+## Pages
+
+1. [Concepts](concepts.md): zones, the shell, mounts, aliases, versions
+2. [Getting started](getting-started.md)
+3. [Configuration: `zoneConfig`](configuration.md)
+4. [CLI: `next-zones check`](cli.md)
+5. [Root URLs: aliases](aliases.md)
+6. [Routing rules: a zone's headers, redirects and rewrites](routing-rules.md)
+7. [Instrumentation](instrumentation.md)
+8. [Assets: fonts, images, public files](assets.md)
+9. [Live updates and requirements](updates.md)
+10. [Zones: live installs](zones.md)
+11. [What is supported](support.md)
+
+## License
+
+Apache-2.0.

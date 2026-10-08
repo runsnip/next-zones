@@ -1,0 +1,25 @@
+{
+  "name": "next-zones-spike-zones",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "shell",
+    "fixtures/*",
+    "fixtures-cc/*"
+  ],
+  "dependencies": {
+    "@runsnip/next-zones": "file:../..",
+    "@spike/ext": "file:../ext-package",
+    "next": "16.3.8",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.8",
+    "playwright": "1.63.0"
+  },
+  "scripts": {
+    "check": "node node_modules/@runsnip/next-zones/src/cli.mjs check fixtures ."
+  }
+}

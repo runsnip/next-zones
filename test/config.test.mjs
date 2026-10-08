@@ -1,0 +1,93 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { zoneConfig, checkZone, readZone, BUILD_OPTIONS } from "../src/config.mjs";
+
+test("zoneConfig leaves the zone's Next config untouched outside a build for Zones, and attaches the declaration", () => {
+  const nextConfig = { reactStrictMode: true, output: "standalone", experimental: { other: 1, turbopackRemoveUnusedExports: true } };
+  const config = zoneConfig({ mount: "/blog" }, nextConfig);
+  assert.equal(config.reactStrictMode, true);
+  assert.equal(config.output, "standalone");
+  assert.deepEqual(config.experimental, nextConfig.experimental);
+  assert.deepEqual(config[Symbol.for("@runsnip/next-zones/zones")], { mount: "/blog", aliases: [] });
+});
+
+test("in a build for Zones, zoneConfig fills in the build options the zone left unset", () => {
+  process.env.NEXT_ZONES_BUILD = "zones";
+  try {
+    const config = zoneConfig({ mount: "/blog" }, { output: "standalone", experimental: { other: 1 } });
+    assert.deepEqual(config.experimental, { other: 1, ...BUILD_OPTIONS });
+    assert.equal(config.output, "standalone");
+  } finally { delete process.env.NEXT_ZONES_BUILD; }
+});
+
+test("in a build for Zones, a zone that sets a build option otherwise is told so, never overridden", () => {
+  process.env.NEXT_ZONES_BUILD = "zones";
+  try {
+    assert.throws(() => zoneConfig({ mount: "/blog" }, { experimental: { turbopackRemoveUnusedExports: true } }), /needs experimental\.turbopackRemoveUnusedExports: false/);
+    assert.equal(zoneConfig({ mount: "/blog" }, { experimental: { turbopackScopeHoisting: false } }).experimental.turbopackScopeHoisting, false);
+  } finally { delete process.env.NEXT_ZONES_BUILD; }
+});
+
+test("a config function is wrapped and keeps its declaration", async () => {
+  const wrapped = zoneConfig({ mount: "/blog" }, async (phase) => ({ env: { PHASE: phase } }));
+  assert.equal(typeof wrapped, "function");
+  assert.equal(wrapped[Symbol.for("@runsnip/next-zones/zones")].mount, "/blog");
+  assert.equal((await wrapped("phase-production-build", {})).env.PHASE, "phase-production-build");
+});
+
+test("aliases are the zone's own rewrites when it runs alone, and left to Zones in a build for Zones", async () => {
+  const aliases = [{ source: "/post/:id", destination: "/blog/:id" }];
+  const own = { rewrites: async () => ({ beforeFiles: [{ source: "/blog/a", destination: "/blog/b" }] }) };
+  const alone = await zoneConfig({ mount: "/blog", aliases }, own).rewrites();
+  assert.deepEqual(alone.beforeFiles.map((r) => r.source), ["/post/:id", "/blog/a"]);
+  process.env.NEXT_ZONES_BUILD = "zones";
+  try {
+    const forZones = await zoneConfig({ mount: "/blog", aliases }, own).rewrites();
+    assert.deepEqual(forZones.beforeFiles.map((r) => r.source), ["/blog/a"]);
+  } finally { delete process.env.NEXT_ZONES_BUILD; }
+});
+
+test("checkZone refuses a bad mount and aliases outside the mount", () => {
+  assert.throws(() => checkZone({ mount: "/a/b" }), /one URL segment/);
+  assert.throws(() => checkZone({ mount: "blog" }), /one URL segment/);
+  assert.throws(() => checkZone({ mount: "/blog", aliases: [{ source: "/:x", destination: "/blog" }] }), /fixed segment/);
+  assert.throws(() => checkZone({ mount: "/blog", aliases: [{ source: "/p/:x", destination: "/shop/:x" }] }), /must point under \/blog/);
+  assert.deepEqual(checkZone({ mount: "/" }), { mount: "/", aliases: [] });
+});
+
+test("readZone reads a declaration back, or null for an app that is not a zone", async () => {
+  assert.equal(await readZone(new URL("..", import.meta.url).pathname), null);
+});
+
+test("livePull is declared by the zone, off by default, and must be a boolean", () => {
+  assert.equal(checkZone({ mount: "/blog" }).livePull, undefined);
+  assert.equal(checkZone({ mount: "/blog", livePull: true }).livePull, true);
+  assert.equal(checkZone({ mount: "/blog", livePull: false }).livePull, undefined);
+  assert.throws(() => checkZone({ mount: "/blog", livePull: "yes" }), /livePull must be true or false/);
+});
+
+test("output is the shell's to declare: images or single", () => {
+  assert.equal(checkZone({ mount: "/" }).mode, undefined);
+  assert.equal(checkZone({ mount: "/", mode: "single" }).mode, "single");
+  assert.equal(checkZone({ mount: "/", mode: "zones" }).mode, undefined);
+  assert.throws(() => checkZone({ mount: "/", mode: "bundle" }), /mode must be "zones" or "single"/);
+  assert.throws(() => checkZone({ mount: "/blog", mode: "single" }), /the shell's to declare/);
+  assert.throws(() => checkZone({ mount: "/", output: "standalone" }), /output is Next's option/);
+});
+
+test("the build options a build lacks are named, for Zones' refusals", async () => {
+  const { missingBuildOptions } = (await import("node:module")).createRequire(import.meta.url)("../src/build-options.cjs");
+  assert.deepEqual(missingBuildOptions({ ...BUILD_OPTIONS }), []);
+  assert.deepEqual(missingBuildOptions({ turbopackScopeHoisting: false }), ["experimental.turbopackRemoveUnusedExports: false", "experimental.turbopackRemoveUnusedImports: false"]);
+  assert.equal(missingBuildOptions(undefined).length, 3);
+});
+
+test("composed by next-zones dev (NEXT_ZONES_BUILD=dev), a zone's config gets no build options, and its aliases are the composer's", async () => {
+  process.env.NEXT_ZONES_BUILD = "dev";
+  try {
+    const config = zoneConfig({ mount: "/blog", aliases: [{ source: "/p/:id", destination: "/blog/:id" }] }, { output: "standalone", experimental: { turbopackRemoveUnusedExports: true } });
+    assert.deepEqual(config.experimental, { turbopackRemoveUnusedExports: true });
+    assert.equal(config.output, "standalone");
+    assert.equal(config.rewrites, undefined);
+  } finally { delete process.env.NEXT_ZONES_BUILD; }
+});
