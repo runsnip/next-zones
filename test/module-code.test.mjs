@@ -63,3 +63,14 @@ test("a class's private names are bindings: renamed alike, never a public proper
   assert.ok(!same(`function(e){return class{#i;m(){return this.#i}}}`, `function(e){return class{i;m(){return this.i}}}`));
   assert.ok(!same(`function(e){return class{#i;m(o){return #i in o}}}`, `function(e){return class{#i;m(o){return o}}}`));
 });
+
+test("re-exports (e.S, Next 16.4) require the module heading each group, and are remapped in place", { skip }, () => {
+  const source = `e=>{e.i(55863),e.S([25098,"Counter,Counter",0,7,"a","b",0,n,"x","y"])}`;
+  const m = readModule(source);
+  assert.deepEqual(m.requires.map((r) => [r.id, r.method]), [["55863", "i"], ["25098", "S"], ["7", "S"]]);
+  assert.equal(remapRequires(source, m.requires, { 25098: 100000000000001 }),
+    `e=>{e.i(55863),e.S([100000000000001,"Counter,Counter",0,7,"a","b",0,n,"x","y"])}`);
+  /* The ids are not part of a module's identity (its requires stand for their own); the names are. */
+  assert.ok(same(source, `e=>{e.i(1),e.S([2,"Counter,Counter",0,3,"a","b",0,n,"x","y"])}`));
+  assert.ok(!same(source, `e=>{e.i(55863),e.S([25098,"Counter,Other",0,7,"a","b",0,n,"x","y"])}`));
+});

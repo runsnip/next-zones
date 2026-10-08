@@ -202,6 +202,22 @@ function readModule(source) {
             requires.push({ id: String(arg.value), method, start: arg.start, end: arg.end });
             emit(`require.${method}(`); for (const a of node.arguments.slice(1)) walk(a, scope, strict); return emit(")");
           }
+          /* Re-exports (Turbopack's esmReexport, Next 16.4 on): `e.S([id, names…, 0, id, names…])`, a flat list of groups,
+             each headed by the module id its exports come from (or a namespace value), ended by a 0. Each id head is a
+             require, in place. */
+          if (method === "S" && arg?.type === "ArrayExpression") {
+            emit("require.S([");
+            let head = true;
+            for (const el of arg.elements) {
+              if (head && el?.type === "Literal" && Number.isInteger(el.value) && el.value !== 0) {
+                requires.push({ id: String(el.value), method, start: el.start, end: el.end });
+                emit("R");
+              } else walk(el, scope, strict);
+              head = el?.type === "Literal" && el.value === 0;
+              emit(",");
+            }
+            emit("]"); for (const a of node.arguments.slice(1)) walk(a, scope, strict); return emit(")");
+          }
         }
         break;
       }
