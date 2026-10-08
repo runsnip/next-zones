@@ -913,3 +913,40 @@ average about 6 from other work, so ±0.1 s):
   the collector returns them.
 - **An earlier measurement was wrong:** `.tgz` 2.4 s and `.zip` 3.7 s were taken while the upgrade guard ran in the
   background; the same code measured 0.3 s and 0.9 s on a quiet machine.
+
+## D8: what it costs, and module fragments (tried, rejected)
+
+**The measure** is the JavaScript a page loads when opened: the build's `rootMainFiles` and the `entryJSFiles` of
+the page's client reference manifest (its layouts and page), each file once, gzipped at level 9. Lazy chunks are
+left out: a sum of every chunk counts code a page never loads (one zone has 696 chunks, most of them one icon each).
+Builds: a real workspace of a shell and four zones on Next 16.4.0 (a copy, with `next` bumped), `next-zones build`,
+three ways: as today (unused exports kept), with Turbopack's module fragments (`turbopackModuleFragments` and unused
+exports removed), and with unused exports removed alone (the target: smallest, but not shareable across builds).
+
+| page | today | fragments | target |
+|---|---|---|---|
+| shell `/` | 198.7 KB | 191.1 | 194.3 |
+| shell `/account/*` (7 pages) | 241.5–259.2 | 251.3–271.9 | 230.3–247.1 |
+| a zone's editor page | 376.6 | 406.6 | 349.0 |
+| a zone's library page | 287.7 | 306.0 | 268.3 |
+| a zone's studio page | 353.7 | 363.6 | 330.3 |
+| a zone's two pages | 245.7–251.3 | 255.9–263.9 | 233.4–238.9 |
+
+- **D8 costs 5–8% of a page's JavaScript** (10–28 KB gzipped) on these apps.
+- **Module fragments are worse than today on 15 of 16 pages** (+2–8%), and on the check bed they cost 4–13 MB of
+  RSS serving the same pages (2.7 times the modules: 958 → 2578), for 16–18% less server JS on disk. Each fragment is
+  a module of its own, and what they trim is mostly functions never called, which V8 never compiles. They also
+  panic on Next 16.3.8 (`module_fragments/graph.rs:746`, even on a one-page app), and one build of a zone using
+  `next/font/google` failed once with them on 16.4.0 ("queries have exactly one entry"). Rejected.
+- **Correctness held with fragments**, once Zones read 16.4's `e.S` re-exports (package `3ab2408`): 48/48 checks.
+
+**Where the 5–8% is** (one zone's page, bytes of generated code by source package through the source maps, today
+minus target, 74.7 KB raw in all): `react-resizable-panels` 17.8 KB, the workspace's UI kit 13.4 KB, `tslib` 9.3 KB,
+`@ecosy/core` 4.7 KB, the workspace's API client 3.5 KB, the rest under 3 KB each. These are modules with many
+exports of which a page uses a few, in packages the shell uses too: keeping whole only the packages the shell
+depends on (checked: a namespace import keeps a module whole, and the context check passes with it) would recover
+nothing here.
+
+**What must be identical across builds is a module with state** (a context, a singleton, a mutable binding), not a
+stateless one: `tslib` trimmed two ways is loaded twice at worst. Next: trim every build, and keep whole only the
+modules that hold state, found from their syntax tree, if that can be shown to miss none.
