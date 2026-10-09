@@ -34,11 +34,11 @@ fs.cpSync(spike, work, { recursive: true, filter: (src) => !skip.test(src) });
 /* The checks reach the package by "../../" (src/, tools/, package.json): in the copy, that is the package's absolute path. */
 for (const file of fs.readdirSync(work).filter((f) => /\.(mjs|cjs|sh)$/.test(f))) {
   const text = fs.readFileSync(path.join(work, file), "utf8");
-  const fixed = text.replaceAll("../../src/", `${root}/src/`).replaceAll("../../tools/", `${root}/tools/`).replaceAll("../../package.json", `${root}/package.json`);
+  const fixed = text.replaceAll("../../src/", `${root}/src/`).replaceAll("../../dist/", `${root}/dist/`).replaceAll("../../tools/", `${root}/tools/`).replaceAll("../../package.json", `${root}/package.json`);
   if (fixed !== text) fs.writeFileSync(path.join(work, file), fixed);
   /* Any other way back to the package would reach nothing from the copy: refuse before building, not after. */
   const left = fixed.split("\n").map((line, i) => [i + 1, line]).filter(([, line]) => /\.\.\/\.\.\/|"\.\.",\s*"\.\."/.test(line));
-  if (left.length) { console.error(`${file}: reaches the package by a path the guard does not rewrite (use "../../src/", "../../tools/" or "../../package.json"):\n${left.map(([n, l]) => `  ${n}: ${l.trim()}`).join("\n")}`); fs.rmSync(work, { recursive: true, force: true }); process.exit(1); }
+  if (left.length) { console.error(`${file}: reaches the package by a path the guard does not rewrite (use "../../src/", "../../dist/", "../../tools/" or "../../package.json"):\n${left.map(([n, l]) => `  ${n}: ${l.trim()}`).join("\n")}`); fs.rmSync(work, { recursive: true, force: true }); process.exit(1); }
 }
 const pkgFile = path.join(work, "package.json");
 const pkg = JSON.parse(fs.readFileSync(pkgFile, "utf8"));

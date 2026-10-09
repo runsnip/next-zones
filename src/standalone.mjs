@@ -16,6 +16,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+/* The folder this code runs from: dist/ in the published package (src/ in the repository), the package's exports'
+   target. */
+const CODE_DIR = path.dirname(fileURLToPath(import.meta.url));
 /* Packages a zone never carries: the shell's single copy serves every zone. */
 const SHELL_ONLY = /^(next|react|react-dom|scheduler|styled-jsx|@next\/[^/]+|@swc\/helpers|@runsnip\/next-zones)$/;
 
@@ -81,9 +84,11 @@ export async function prepareStandaloneZones({ shellDir, declaration, store, pin
   /* next-zones, which the shell's server trace does not reach (the shell imports its client only). */
   const own = path.join(root, "node_modules", "@runsnip", "next-zones");
   fs.rmSync(own, { recursive: true, force: true });
-  for (const entry of ["package.json", "src", "tsconfig", "LICENSE", "NOTICE"]) {
+  for (const entry of ["package.json", "tsconfig", "LICENSE", "NOTICE"]) {
     if (fs.existsSync(path.join(PACKAGE_DIR, entry))) fs.cpSync(path.join(PACKAGE_DIR, entry), path.join(own, entry), { recursive: true });
   }
+  /* Its code, where its package.json's exports point (dist/), whichever folder it runs from. */
+  fs.cpSync(CODE_DIR, path.join(own, "dist"), { recursive: true });
   /* What Zones' server needs that the shell's own trace did not reach (Next's modules it hooks or calls, its workers'),
      traced the way Next traces server.js (Next's own @vercel/nft) and copied in where missing. */
   await traceZonesRuntime({ shellDir, root });
@@ -198,7 +203,7 @@ async function traceZonesRuntime({ shellDir, root }) {
     .map((id) => { try { return fs.realpathSync(fromShell.resolve(id)); } catch { return null; } }).filter(Boolean);
   const own = [];
   const walk = (dir) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { const f = path.join(dir, e.name); if (e.isDirectory()) walk(f); else if (/\.(c|m)?js$/.test(e.name)) own.push(f); } };
-  walk(path.join(PACKAGE_DIR, "src"));
+  walk(CODE_DIR);
   return traceInto({ shellDir, root, entries: [...own, ...nextFiles] });
 }
 

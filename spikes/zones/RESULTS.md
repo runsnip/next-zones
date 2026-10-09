@@ -1086,3 +1086,37 @@ every request (a zone's public files are now listed once per version), the page 
 (bound once), and the module hook's cheap tests run last. In a CPU profile of 6000 `/docs/ssr` requests, Zones' own
 code is now about 5% of the busy time: the asynchronous contexts that bind each render to its build (about 2%), the
 metrics (about 1.6%), the request's routing to a zone; the rest is Next's.
+
+## The published package
+
+The package is `dist/`, built from `src/` by `tools/build-dist.mjs` (`npm pack` and `npm publish` run it): each module
+minified on its own (no bundle: the code loads its own files by path, its worker threads among them), directives kept
+("use client", "use strict"), the command's shebang kept and executable. `src/` stays in the repository.
+
+**The minifier**, on the 52 modules of `src/` (442.0 KB, 152.9 KB gzipped), Node 24.16, Apple M1:
+
+| Tool | KB | gzip KB | Time | Invalid files |
+|---|---|---|---|---|
+| swc 1.16.13 | 210.8 | 86.0 | 94 ms | 0 |
+| oxc-minify 0.153.0 | 216.3 | 86.2 | 28 ms | 0 |
+| terser 5.51.2 | 214.9 | 86.3 | 736 ms | 0 |
+| esbuild 0.28.2 | 215.5 | 87.9 | 107 ms | 0 |
+
+swc: the smallest output. It drops a module's "use client": the build puts it back.
+
+**Names kept, no source maps.** Source maps of the minified code were 350.7 KB (124.9 KB gzipped), more than the code
+itself (87.5 KB gzipped). Not mangling names costs 8.6 KB gzipped (94.6 against 86.0) and keeps every function's name
+in a stack trace. So: names kept, no maps.
+
+| | Package (tarball) | Unpacked | Files |
+|---|---|---|---|
+| Before (`src/` as written) | 184.8 kB | 606.1 kB | 66 |
+| Minified, with source maps | 235.4 kB | 730.8 kB | 118 |
+| Minified, names kept, no maps (published) | 131.6 kB | 417.3 kB | 66 |
+
+Loading Zones' server modules (`require` of hooks, activate, stage, install, zone-client, metrics, sources, describe,
+module-code; median of 21 fresh processes, two rounds each): `src/` 10.0 and 11.0 ms, `dist/` 9.6 and 8.7 ms.
+
+Checked as installed: the upgrade guard installs the package from its folder (`npm install` packs it, which builds
+`dist/`) and runs every check against it: 55 of 55 on Next 16.3.8 (with names mangled and maps, the first build),
+16.4.0 and 16.3.6 (names kept, no maps).

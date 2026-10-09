@@ -30,7 +30,7 @@
     "node": ">=24"
   },
   "files": [
-    "src",
+    "dist",
     "tsconfig",
     "LICENSE",
     "NOTICE",
@@ -41,51 +41,56 @@
   "type": "module",
   "exports": {
     "./config": {
-      "types": "./src/config.d.mts",
-      "import": "./src/config.mjs",
-      "require": "./src/config.mjs",
-      "default": "./src/config.mjs"
+      "types": "./dist/config.d.mts",
+      "import": "./dist/config.mjs",
+      "require": "./dist/config.mjs",
+      "default": "./dist/config.mjs"
     },
     "./client": {
-      "types": "./src/client.d.mts",
-      "import": "./src/client.mjs",
-      "require": "./src/client.mjs",
-      "default": "./src/client.mjs"
+      "types": "./dist/client.d.mts",
+      "import": "./dist/client.mjs",
+      "require": "./dist/client.mjs",
+      "default": "./dist/client.mjs"
     },
     "./zones": {
-      "types": "./src/zones/index.d.cts",
-      "import": "./src/zones/index.cjs",
-      "require": "./src/zones/index.cjs",
-      "default": "./src/zones/index.cjs"
+      "types": "./dist/zones/index.d.cts",
+      "import": "./dist/zones/index.cjs",
+      "require": "./dist/zones/index.cjs",
+      "default": "./dist/zones/index.cjs"
     },
     "./build": {
-      "types": "./src/build.d.mts",
-      "import": "./src/build.mjs",
-      "require": "./src/build.mjs",
-      "default": "./src/build.mjs"
+      "types": "./dist/build.d.mts",
+      "import": "./dist/build.mjs",
+      "require": "./dist/build.mjs",
+      "default": "./dist/build.mjs"
     },
     "./metrics": {
-      "types": "./src/metrics.d.cts",
-      "import": "./src/metrics.cjs",
-      "require": "./src/metrics.cjs",
-      "default": "./src/metrics.cjs"
+      "types": "./dist/metrics.d.cts",
+      "import": "./dist/metrics.cjs",
+      "require": "./dist/metrics.cjs",
+      "default": "./dist/metrics.cjs"
     },
     "./sources": {
-      "types": "./src/sources.d.cts",
-      "import": "./src/sources.cjs",
-      "require": "./src/sources.cjs",
-      "default": "./src/sources.cjs"
+      "types": "./dist/sources.d.cts",
+      "import": "./dist/sources.cjs",
+      "require": "./dist/sources.cjs",
+      "default": "./dist/sources.cjs"
     },
     "./tsconfig/zone.json": "./tsconfig/zone.json",
     "./package.json": "./package.json"
   },
   "bin": {
-    "next-zones": "./src/cli.mjs"
+    "next-zones": "./dist/cli.mjs"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "test:zones": "node spikes/zones/check-all.mjs",
     "test:upgrade": "node tools/upgrade-guard.mjs",
-    "llms": "node tools/llms.mjs"
+    "llms": "node tools/llms.mjs",
+    "build": "node tools/build-dist.mjs",
+    "prepack": "node tools/build-dist.mjs"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.16.13"
   }
 }

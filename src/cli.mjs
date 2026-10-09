@@ -82,7 +82,7 @@ else if (command === "prune") await prune();
 else if (command === "doctor") await runDoctor();
 else if (command === "dev") await runDev();
 else if (command === "watch") await runWatch();
-else usage("init | add | check | doctor | dev | build | start | serve | install | pack | pull | prune | watch   (see the header of src/cli.mjs)");
+else usage("init | add | check | doctor | dev | build | start | serve | install | pack | pull | prune | watch   (see https://github.com/runsnip/next-zones/blob/main/docs/cli.md)");
 
 async function runInit() {
   const noInstall = rest.includes("--no-install");

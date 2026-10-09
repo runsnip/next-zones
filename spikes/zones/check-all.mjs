@@ -74,8 +74,12 @@ const EXPECTED = /may hold state|boom|broken on purpose|NoFallbackError|metadata
 const chosen = process.argv.slice(2).length ? process.argv.slice(2) : CHECKS;
 /* The spike installs the package as a copy (install-links: Turbopack refuses a link out of its root), so the copy
    is brought up to date with src/ first: the zones' next.config and the shell import it. */
-/* Written "../../src/" so the upgrade guard, which runs a copy of this folder, can point it at the package. */
-fs.cpSync("../../src/", path.join("node_modules", "@runsnip", "next-zones", "src"), { recursive: true });
+/* Written "../../dist/" so the upgrade guard, which runs a copy of this folder, can point it at the package. The
+   package as published: dist/, built from src/ (tools/build-dist.mjs). */
+execFileSync(process.execPath, ["../../tools/build-dist.mjs"], { stdio: "ignore" });
+fs.rmSync(path.join("node_modules", "@runsnip", "next-zones", "src"), { recursive: true, force: true });
+fs.rmSync(path.join("node_modules", "@runsnip", "next-zones", "dist"), { recursive: true, force: true });
+fs.cpSync("../../dist/", path.join("node_modules", "@runsnip", "next-zones", "dist"), { recursive: true });
 /* Its exports map too (a new subpath, such as ./metrics, is resolved from it). */
 fs.copyFileSync("../../package.json", path.join("node_modules", "@runsnip", "next-zones", "package.json"));
 const BASE = "http://127.0.0.1:3900";
