@@ -161,9 +161,44 @@ const groupOf = new Map();
 for (const c of chunks) for (const g of c.groups) for (const id of g.ids) groupOf.set(String(id), g);
 const zoneIds = identities(chunks.flatMap((c) => c.groups));
 
+/* 0. Aliases. Turbopack's ids are a hash of the module's path cut to as many digits as the build needs to keep them
+   apart, so one module has a longer id in a build with more modules: 912598 in a zone of 3,000 modules, 12598 in a
+   shell of 400 (the shorter is the longer's last digits). Such a module is the shell's, under another id: the same
+   identity with the same last digits. The zone uses the id the browser may hold, so the module is shared. */
+const aliases = new Map();                                     // zone id → the shell's id for the same module
+{
+  /* A build's width is the digits of its largest id (an id may be shorter: its leading zeros are dropped). */
+  const widthOf = (ids) => String(Math.max(0, ...[...ids].filter((id) => /^\d+$/.test(id)).map(Number))).length;
+  const shellIds = new Set(chunksOf(shellDist).flatMap((f) => chunkGroups(path.join(shellDist, "static", "chunks", f)).flatMap((g) => g.ids.map(String))));
+  const ws = widthOf(shellIds), wz = widthOf(zoneIds.keys());
+  if (ws !== wz) {
+    const mod = 10 ** Math.min(ws, wz);
+    const byLow = new Map();
+    for (const id of shellIds) if (/^\d+$/.test(id)) { const k = Number(id) % mod; (byLow.get(k) ?? byLow.set(k, []).get(k)).push(id); }
+    for (const [id, h] of zoneIds) {
+      if (!/^\d+$/.test(id) || known.get(id)?.has(h)) continue;
+      const match = (byLow.get(Number(id) % mod) ?? []).find((other) => other !== id && known.get(other)?.has(h) && !(groupOf.has(other) && zoneIds.get(other) !== h));
+      if (match) aliases.set(id, match);
+    }
+  }
+}
+
+/* The modules the zone has that the browser may hold (the same identity), and how many of them it has under the same
+   id (or an alias). Builds made from different project roots name every module differently, so they share none:
+   stage.cjs refuses such a zone rather than run it with two copies of everything the shell has. */
+const shared = { sameCode: 0, sameId: 0 };
+{
+  const knownHashes = new Set([...known.values()].flatMap((hs) => [...hs]));
+  for (const [id, h] of zoneIds) {
+    if (!knownHashes.has(h)) continue;
+    shared.sameCode++;
+    if (known.get(id)?.has(h) || aliases.has(id)) shared.sameId++;
+  }
+}
+
 /* 1–2. Conflicts, spread to the importers the browser may hold. */
 const conflicting = new Set();
-for (const [id, h] of zoneIds) if (known.has(id) && !known.get(id).has(h)) conflicting.add(id);
+for (const [id, h] of zoneIds) if (!aliases.has(id) && known.has(id) && !known.get(id).has(h)) conflicting.add(id);
 const importers = new Map();
 for (const [id, g] of groupOf) for (const dep of requiredBy(g)) (importers.get(dep) ?? importers.set(dep, new Set()).get(dep)).add(id);
 const queue = [...conflicting];
@@ -174,7 +209,7 @@ while (queue.length) {
 }
 
 /* 3. New ids, and every chunk written again. */
-const idMap = {};
+const idMap = Object.fromEntries([...aliases].map(([id, to]) => [id, Number(to)]));
 const taken = new Set([...known.keys(), ...groupOf.keys()]);
 for (const id of conflicting) {
   let n = 1e14 + (parseInt(crypto.createHash("sha1").update(`${buildKey}:${id}`).digest("hex").slice(0, 12), 16) % 8e14);
@@ -202,7 +237,7 @@ const chunkSource = (groups, sourceOf) => {
 };
 /* Each required id rewritten where the parse found it: the original ids stay what the analysis below follows. */
 const remapSource = (g) => remapRequires(g.source, read(g).requires, idMap);
-if (conflicting.size) {
+if (Object.keys(idMap).length) {
   fs.mkdirSync(outDir, { recursive: true });
   for (const c of chunks) {
     const touched = c.groups.some((g) => g.ids.some((id) => idMap[id] !== undefined) || requiredBy(g).some((d) => idMap[d] !== undefined));
@@ -222,14 +257,14 @@ for (const f of shellBuild.rootMainFiles ?? []) if (!isRuntime(f)) for (const g 
 const zoneMainFiles = new Set((zoneBuild.rootMainFiles ?? []).filter((f) => !isRuntime(f)).map((f) => path.basename(f)));
 const mainGroups = chunks.filter((c) => zoneMainFiles.has(c.file) && !fs.existsSync(path.join(shellDist, "static", "chunks", c.file))).flatMap((c) => c.groups);
 const lacking = new Set();
-const pending = mainGroups.filter((g) => g.ids.some((id) => !shellMain.has(String(id)) || idMap[id] !== undefined));
+const pending = mainGroups.filter((g) => g.ids.some((id) => !shellMain.has(String(idMap[id] ?? id)) || (idMap[id] !== undefined && !aliases.has(String(id)))));
 while (pending.length) {
   const g = pending.pop();
   if (lacking.has(g)) continue;
   lacking.add(g);
   for (const dep of requiredBy(g)) {
     const d = groupOf.get(dep);
-    if (d && !lacking.has(d) && mainGroups.includes(d) && d.ids.some((id) => !shellMain.has(String(id)) || idMap[id] !== undefined)) pending.push(d);
+    if (d && !lacking.has(d) && mainGroups.includes(d) && d.ids.some((id) => !shellMain.has(String(idMap[id] ?? id)) || (idMap[id] !== undefined && !aliases.has(String(id))))) pending.push(d);
   }
 }
 const mainSource = lacking.size ? chunkSource([...lacking], (g) => g.output ?? g.source) : null;
@@ -274,5 +309,5 @@ const shellRuntimeFile = shellBuild.rootMainFiles?.find(isRuntime);
   const zoneModules = {};
   for (const [id, h] of zoneIds) (zoneModules[idMap[id] ?? id] ??= []).push(h);
   saveReads();
-  parentPort.postMessage({ idMap, chunkMap, mainSource, missingUsed, zoneModules, shellModules });
+  parentPort.postMessage({ idMap, chunkMap, mainSource, shared, missingUsed, zoneModules, shellModules });
 })().catch((error) => setImmediate(() => { throw error; }));

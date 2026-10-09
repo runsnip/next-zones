@@ -13,6 +13,9 @@
 const Module = require("node:module");
 const crypto = require("node:crypto");
 
+/* The digits of a module id the registry keys by (keyOf): fewer than the narrowest build's ids, so ids of any width
+   that end alike key alike; with the code's hash in the key, sharing takes the same module. */
+const ID_DIGITS = 4;
 /* The two runtime layouts: up to Next 16.3 the cache is a plain object, from 16.4 a Map. */
 const LAYOUTS = [
   { kind: "object", cache: "const moduleFactories = new Map();\nconst moduleCache = Object.create(null);", overwritten: "function getOverwrittenModule(moduleCache, id) {\n    let module = moduleCache[id];" },
@@ -40,7 +43,13 @@ function installModuleRegistry(ctx) {
     if (!factory) return null;
     let key = factoryKeys.get(factory);
     if (!key) {
-      key = `${id}:${crypto.createHash("sha1").update(factory.toString()).digest("base64")}`;
+      /* Turbopack cuts a build's ids to as many digits as its module count needs, so one module has a longer id in a
+         bigger build (912598, 12598; an id's leading zeros are dropped): the key keeps the module's id and every long
+         number in its code (the ids it requires among them) modulo 10^ID_DIGITS, so the same module keys alike in
+         builds of either width. */
+      const low = (n) => String(Number(n) % 10 ** ID_DIGITS);
+      const code = factory.toString().replace(/\b\d{5,}\b/g, low);
+      key = `${typeof id === "number" || /^\d+$/.test(id) ? low(String(id)) : id}:${crypto.createHash("sha1").update(code).digest("base64")}`;
       factoryKeys.set(factory, key);
     }
     return key;

@@ -115,7 +115,18 @@ export function zoneConfig(zone, nextConfig = {}) {
     if (conflicting.length) {
       throw new Error(`next-zones: a build for Zones needs ${conflicting.map((k) => `experimental.${k}: ${BUILD_OPTIONS[k]}`).join(", ")}, which this zone's Next config sets otherwise: remove it from the config (a zone built alone, with next build, keeps it). See configuration.md, "Build options for Zones"`);
     }
-    return { ...withAliases(config, declared), experimental: { ...config.experimental, ...BUILD_OPTIONS }, [ZONE]: declared };
+    /* The project root, pinned: Turbopack names every module by its path from the root and derives its id from that, so
+       builds that share modules (the shell, every zone image) must have one root. Next infers it from the topmost
+       lockfile above the app, so a lockfile added in a parent folder changed every id of the builds after it, and
+       nothing was shared with the images built before. NEXT_ZONES_ROOT, else the nearest folder Next is installed in. */
+    const root = projectRoot();
+    return {
+      ...withAliases(config, declared),
+      experimental: { ...config.experimental, ...BUILD_OPTIONS },
+      turbopack: { ...config.turbopack, root: config.turbopack?.root ?? root },
+      outputFileTracingRoot: config.outputFileTracingRoot ?? config.turbopack?.root ?? root,
+      [ZONE]: declared,
+    };
   };
   if (typeof nextConfig === "function") {
     const wrapped = async (...args) => apply(await nextConfig(...args));
@@ -123,6 +134,23 @@ export function zoneConfig(zone, nextConfig = {}) {
     return wrapped;
   }
   return apply(nextConfig);
+}
+
+/** The root a build for Zones is made from: NEXT_ZONES_ROOT, else the nearest folder from the current one whose
+    node_modules holds next (where Next itself is resolved from), whatever lockfiles lie above it; widened to hold
+    that node_modules where it really is, when it is a link. */
+export function projectRoot(from = process.cwd()) {
+  if (process.env.NEXT_ZONES_ROOT) return path.resolve(process.env.NEXT_ZONES_ROOT);
+  for (let dir = path.resolve(from); ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, "node_modules", "next", "package.json"))) {
+      /* A node_modules linked from elsewhere must stay inside the root: the nearest folder holding both. */
+      const real = path.dirname(fs.realpathSync(path.join(dir, "node_modules")));
+      let root = fs.realpathSync(dir);
+      while (real !== root && !real.startsWith(root + path.sep)) root = path.dirname(root);
+      return root;
+    }
+    if (path.dirname(dir) === dir) return path.resolve(from);
+  }
 }
 
 const CONFIG_FILES = ["next.config.mjs", "next.config.js", "next.config.ts", "next.config.mts"];

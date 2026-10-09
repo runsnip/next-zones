@@ -21,3 +21,4 @@ next-env.d.ts
 .zones-standalone
 .zones-export-check
 .zones-export
+spikes/zones/fixtures/wide/app/wide/many/

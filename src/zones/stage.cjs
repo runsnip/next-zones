@@ -166,7 +166,7 @@ function createStaging(ctx) {
     await fs.promises.rename(temp, file);
   }
 
-  const ANALYSIS = "m7";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
+  const ANALYSIS = "m10";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
   async function analyseZoneClient(staged) {
     const fingerprint = crypto.createHash("sha1").update(JSON.stringify([ANALYSIS, ctx.clientKnown ? [...ctx.clientKnown].map(([id, h]) => [id, [...h].sort()]).sort() : "shell"])).digest("hex").slice(0, 12);
     const base = path.join(ctx.cacheDir, staged.name, `${staged.buildKey}--${fingerprint}`);
@@ -178,6 +178,11 @@ function createStaging(ctx) {
         readCache: path.join(ctx.cacheDir, `module-reads-${ANALYSIS}.json`),
         known: ctx.clientKnown ? Object.fromEntries([...ctx.clientKnown].map(([id, h]) => [id, [...h]])) : null,
       });
+      /* Most of what the zone has in common with the shell must be under the same ids, or the two were built from
+         different project roots (every module named otherwise) and would share nothing. */
+      if (result.shared && result.shared.sameCode >= 10 && result.shared.sameId < result.shared.sameCode / 2) {
+        throw new ZoneError(`zone "${staged.name}" ${staged.version ?? ""} was built from another project root than the shell: of the ${result.shared.sameCode} client modules it has in common with the shell, ${result.shared.sameId} are under the same ids, so it would load a second copy of each (React's contexts among them). Build the shell and the zone with next-zones build from the same workspace (it pins the root; NEXT_ZONES_ROOT sets it)`);
+      }
       if (result.missingUsed.length) {
         throw new ZoneError(`zone "${staged.name}" uses client runtime features the shell's runtime lacks (${result.missingUsed.join(", ")}): import @runsnip/next-zones/client in the shell (render <ZoneUpdates />), which gives its runtime every feature, and rebuild the shell`);
       }

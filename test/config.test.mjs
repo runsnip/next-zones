@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { zoneConfig, checkZone, readZone, BUILD_OPTIONS } from "../src/config.mjs";
+import { zoneConfig, checkZone, readZone, BUILD_OPTIONS, projectRoot } from "../src/config.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 test("zoneConfig leaves the zone's Next config untouched outside a build for Zones, and attaches the declaration", () => {
   const nextConfig = { reactStrictMode: true, output: "standalone", experimental: { other: 1, turbopackRemoveUnusedExports: true } };
@@ -90,4 +93,43 @@ test("composed by next-zones dev (NEXT_ZONES_BUILD=dev), a zone's config gets no
     assert.equal(config.output, "standalone");
     assert.equal(config.rewrites, undefined);
   } finally { delete process.env.NEXT_ZONES_BUILD; }
+});
+
+test("a build for Zones pins the project root: where next is installed, not the topmost lockfile; the zone's own kept", () => {
+  const top = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nz-root-")));
+  const workspace = path.join(top, "workspace"), app = path.join(workspace, "shell");
+  fs.mkdirSync(path.join(workspace, "node_modules", "next"), { recursive: true });
+  fs.writeFileSync(path.join(workspace, "node_modules", "next", "package.json"), "{}");
+  fs.mkdirSync(app);
+  fs.writeFileSync(path.join(top, "package-lock.json"), "{}");          // what Next would take as the root
+  const cwd = process.cwd();
+  process.env.NEXT_ZONES_BUILD = "zones";
+  try {
+    process.chdir(app);
+    assert.equal(projectRoot(), workspace);
+    const config = zoneConfig({ mount: "/blog" }, {});
+    assert.equal(config.turbopack.root, workspace);
+    assert.equal(config.outputFileTracingRoot, workspace);
+    assert.equal(zoneConfig({ mount: "/blog" }, { turbopack: { root: top } }).turbopack.root, top);
+    process.env.NEXT_ZONES_ROOT = top;
+    assert.equal(zoneConfig({ mount: "/blog" }, {}).turbopack.root, top);
+  } finally {
+    process.chdir(cwd); delete process.env.NEXT_ZONES_BUILD; delete process.env.NEXT_ZONES_ROOT;
+    fs.rmSync(top, { recursive: true, force: true });
+  }
+});
+
+test("the pinned root holds a node_modules linked from elsewhere", () => {
+  const top = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nz-root-")));
+  const bed = path.join(top, "bed"), other = path.join(bed, ".export", "app");
+  fs.mkdirSync(path.join(bed, "node_modules", "next"), { recursive: true });
+  fs.writeFileSync(path.join(bed, "node_modules", "next", "package.json"), "{}");
+  fs.mkdirSync(other, { recursive: true });
+  fs.symlinkSync(path.join(bed, "node_modules"), path.join(other, "node_modules"));
+  const outside = path.join(top, "elsewhere");
+  fs.mkdirSync(outside); fs.symlinkSync(path.join(bed, "node_modules"), path.join(outside, "node_modules"));
+  try {
+    assert.equal(projectRoot(other), bed);
+    assert.equal(projectRoot(outside), top);
+  } finally { fs.rmSync(top, { recursive: true, force: true }); }
 });
