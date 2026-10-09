@@ -3,7 +3,8 @@
  * blog uses a server external package (@spike/ext) the shell does not. next-zones build makes the shell's standalone
  * folder the whole deploy: zones.js, next-zones, the shell's declaration, the images and the pins. Copied out of the
  * workspace (no sources, no node_modules around it), `node zones.js` serves every zone: pages, the external package
- * from blog's image, an alias, public files, soft navigation between zones, and Zones' endpoints.
+ * from blog's image, an alias, public files, soft navigation between zones, and Zones' endpoints; and docs, a zone on
+ * the Pages Router: its static, getStaticProps and getServerSideProps pages, rendered from its own build.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -19,7 +20,7 @@ const PORT = 3911, BASE = `http://127.0.0.1:${PORT}`;
 const wrong = {}, seen = {};
 
 fs.rmSync(dir, { recursive: true, force: true });
-for (const [zone, from] of [["shell", "shell"], ["blog", "fixtures/blog"], ["shop", "fixtures/shop"]]) {
+for (const [zone, from] of [["shell", "shell"], ["blog", "fixtures/blog"], ["shop", "fixtures/shop"], ["docs", "fixtures/docs"]]) {
   fs.cpSync(from, path.join(dir, zone), { recursive: true, filter: (src) => !/[\\/](\.next|node_modules|next-env\.d\.ts|tsconfig\.tsbuildinfo)$/.test(src) });
   const file = path.join(dir, zone, "package.json");
   fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, "utf8")), name: `standalone-${zone}`, version: "1.0.0" }, null, 2));
@@ -62,6 +63,14 @@ try {
   const ext = await get("/blog/ext");
   seen.ext = /zone blog ext (<!-- -->)?from an external package/.test(ext.body) ? "from an external package" : ext.status;
   if (seen.ext !== "from an external package") wrong.ext = { status: ext.status, body: ext.body.slice(0, 300), log: log.slice(-1500) };
+  const docsId = fs.readFileSync(path.join(dir, ".zones-store", "docs", "1.0.0", "BUILD_ID"), "utf8").trim();
+  seen.docs = {};
+  for (const [p, title] of [["/docs", "index 1.0.0"], ["/docs/a", "doc a 1.0.0"], ["/docs/zz", "doc zz 1.0.0"], ["/docs/ssr?q=s", "ssr 1.0.0 s"], ["/docs/plain", "plain 1.0.0"]]) {
+    const r = await get(p);
+    const got = { status: r.status, title: /<h1 id="title">(.*?)<\/h1>/.exec(r.body)?.[1]?.replace(/<!-- -->/g, "") ?? null, ownBuild: r.body.includes(`"buildId":"${docsId}"`) };
+    seen.docs[p] = got;
+    if (got.status !== 200 || got.title !== title || !got.ownBuild) wrong[p] = { ...got, log: log.slice(-800) };
+  }
 
   const browser = await chromium.launch();
   const page = await browser.newPage();

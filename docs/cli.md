@@ -160,7 +160,7 @@ with `1` on an error.
 | A zone's `app/` holds its mount, plus root files used alone (`layout`, `not-found`, `global-error`, `global-not-found`, `error`, `loading`, `template`, `default`, CSS) | Routes outside the mount are refused |
 | No zone's mount or alias on a segment the shell's `app/` serves (route groups included) | A segment has one owner; refused at install |
 | No edge runtime in a zone | Not served by Zones yet |
-| No Pages Router routes in a zone (`pages/`, Next's `_app`, `_document`, `_error`, `404`, `500` aside) | Zones serves a zone's `app/` routes only; refused at install |
+| A zone's `pages/` holds its mount (`pages<mount>/`, `pages<mount>.tsx`), plus `_app`, `_document`, `_error`, `404`, `500` | Pages outside the mount, `pages/api/` among them (served at `/api/…`), are refused |
 | A zone's `public/` holds only `public/<mount>/` | Public files are served at the root, beside other zones' |
 | `env` keys with one value across zones (warning) | Composed by `dev`, a key has one value |
 | A path alias that differs between zones has the form `"prefix/*": ["folder/*"]` | The form `dev` gives each zone |

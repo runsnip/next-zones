@@ -45,7 +45,9 @@ await zones.install("blog", "13");
 ```
 
 **Rules for the process:**
-- One Zones per process, created before anything else requires Next. It hooks Node's module loader and Next's internals.
+- One Zones per process, created before anything else requires Next. It hooks Node's module loader (`require` and, through
+  Node's module hooks, `import`) and Next's internals.
+- `NODE_ENV` is set to `"production"` when it is unset, as `next start` does: packages read it once, as they load.
 - `zones.handleRequest(req, res)` mounts it in a server of your own, after `await zones.prepare(port, hostname)`
   (async: it readies Next and installs the pinned versions; `listen()` does both and listens). `port` and `hostname`
   are where your server listens, which Next needs to know. `handleRequest` returns a promise, and answers every

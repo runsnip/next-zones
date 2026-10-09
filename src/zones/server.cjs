@@ -74,6 +74,7 @@ function createServer(ctx, { assets, installer, bench, collector }) {
   async function handleRequest(req, res) {
     return ctx.requestScope ? ctx.requestScope(() => handleScoped(req, res)) : handleScoped(req, res);
   }
+  let shellBuildId = null;
   async function handleScoped(req, res) {
     ctx.reclaim?.track(req, res);
     const url = new URL(req.url, "http://x");
@@ -85,6 +86,17 @@ function createServer(ctx, { assets, installer, bench, collector }) {
       if (req.method === "HEAD") return res.end();
       fs.createReadStream(asset.file).pipe(res);
       return;
+    }
+    /* A Pages Router page of a zone renders with its zone's build id, so its client asks for /_next/data/<that id>/…:
+       Next's router knows the shell's only, so the request is read as the shell's (the page then renders with its
+       zone's id again: hooks.cjs). */
+    if (ctx.zoneBuildIds.size && url.pathname.startsWith("/_next/data/")) {
+      const at = url.pathname.indexOf("/", "/_next/data/".length);
+      const id = at === -1 ? "" : url.pathname.slice("/_next/data/".length, at);
+      if (ctx.zoneBuildIds.has(id)) {
+        shellBuildId ??= fs.readFileSync(path.join(ctx.shell, ".next", "BUILD_ID"), "utf8").trim();
+        req.url = `/_next/data/${shellBuildId}${url.pathname.slice(at)}${url.search}`;
+      }
     }
     return handle(req, res);
   }

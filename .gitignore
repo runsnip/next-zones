@@ -23,3 +23,5 @@ next-env.d.ts
 .zones-export
 .zones-app
 spikes/zones/fixtures/wide/app/wide/many/
+.single-pages*
+.zones-compose-pages

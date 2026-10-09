@@ -33,13 +33,19 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
    * build when it is required, loadManifests runs with that build in its async context, and the loads follow it.
    */
   const renderBuild = new AsyncLocalStorage();
+  /* A Pages Router page renders whole in its zone's build (its own document, runtime and chunks): the manifests its
+     route module loads that describe the build (its id, its build manifest…) are the zone's. */
+  const pagesBuild = new AsyncLocalStorage();
+  const PAGES_OWN = /^(BUILD_ID|build-manifest\.json|fallback-build-manifest\.json|dynamic-css-manifest(\.json)?|server\/next-font-manifest\.json|server\/subresource-integrity-manifest\.json|server\/pages\/.*)$/;
+  const shellPagesManifest = path.join(ctx.shell, ".next", "server", "pages-manifest.json");
   const routeBuilds = new WeakMap();                      // a zone page bundle's route module → its build's folder
+  const bound = new WeakSet();                            // the bundles (or their promises) already looked at
   const patchedRuntimes = new WeakSet();
   ctx.renderBuild = () => renderBuild.getStore();
   function bindRenders(request, parent, mod) {
     if (!mod || typeof mod !== "object") return;
     /* Next's compiled app-page / app-route runtime: its RouteModule.loadManifests, wrapped once. */
-    if (typeof request === "string" && /next-server[\\/]app-(page|route)[^\\/]*\.runtime\.(prod|dev)\.js$/.test(request)) {
+    if (typeof request === "string" && /next-server[\\/](app-(page|route)|pages(-api)?)[^\\/]*\.runtime\.(prod|dev)\.js$/.test(request)) {
       for (const exported of Object.values(mod)) {
         if (typeof exported !== "function") continue;
         let proto = exported.prototype;
@@ -49,17 +55,28 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
         const loadManifests = proto.loadManifests;
         proto.loadManifests = function (...args) {
           const build = routeBuilds.get(this);
-          return build ? renderBuild.run(build, () => loadManifests.apply(this, args)) : loadManifests.apply(this, args);
+          if (!build) return loadManifests.apply(this, args);
+          const pages = this.definition?.kind === "PAGES" || this.definition?.kind === "PAGES_API";
+          return renderBuild.run(build, () => (pages ? pagesBuild.run(build, () => loadManifests.apply(this, args)) : loadManifests.apply(this, args)));
         };
       }
       return;
     }
-    /* A zone's page or route bundle: its route module belongs to that build. */
-    if (mod.routeModule && typeof mod.routeModule === "object" && ctx.zoneDists.size) {
-      let file;
-      try { file = Module._resolveFilename(request, parent); } catch { return; }
-      for (const dist of ctx.zoneDists) if (file.startsWith(dist)) { routeBuilds.set(mod.routeModule, dist); break; }
-    }
+    /* A zone's page or route bundle: its route module belongs to that build. A bundle that imports an ES module from
+       outside (an async module) is a promise of its exports. */
+    if (!ctx.zoneDists.size) return;
+    const thenable = typeof mod.then === "function";
+    if (!thenable && !(mod.routeModule && typeof mod.routeModule === "object")) return;
+    /* Next requires a page's bundle on every render: one already bound is not resolved again. */
+    if (bound.has(mod)) return;
+    bound.add(mod);
+    let file;
+    try { file = Module._resolveFilename(request, parent); } catch { return; }
+    let build = null;
+    for (const dist of ctx.zoneDists) if (file.startsWith(dist)) { build = dist; break; }
+    if (!build) return;
+    if (!thenable) routeBuilds.set(mod.routeModule, build);
+    else mod.then((exports) => { if (exports?.routeModule && typeof exports.routeModule === "object") routeBuilds.set(exports.routeModule, build); }, () => {});
   }
 
   /* The module objects of the located files, once Next has loaded them: name → exports. */
@@ -80,6 +97,11 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
       /* A route's own manifest (its client reference manifest, its react-loadable manifest) read from the zone's build:
          the build of the render asking (bindRenders), else the zones' active versions. */
       const fromZone = (load, args) => {
+        const pages = pagesBuild.getStore();
+        if (pages && typeof args?.manifest === "string" && PAGES_OWN.test(args.manifest)) {
+          remember(path.join(pages, args.manifest));
+          return load({ ...args, projectDir: pages, distDir: "." });
+        }
         if (typeof args?.manifest === "string" && args.manifest.startsWith("server/app/")) {
           const build = renderBuild.getStore();
           /* `build` is one of the two names stage.cjs gives a build's folder (as given, and its real path). */
@@ -110,6 +132,8 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
           const value = mod.loadManifest(p, ...rest);
           if (p.endsWith(`${path.sep}prerender-manifest.json`)) return manifests.withZonePrerenders(value);
           if (p.endsWith(`${path.sep}server${path.sep}app-paths-manifest.json`)) return manifests.withZoneAppPaths(value);
+          /* Every page's file (requirePage): the zones' pages, merged by the switch. */
+          if (ctx.mergedPagesManifest && p === shellPagesManifest) return ctx.mergedPagesManifest;
           return value;
         },
       };
@@ -131,9 +155,13 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
         expect(checker?.appFiles instanceof Set && Array.isArray(checker.dynamicRoutes), "the router's fs checker has appFiles (a Set) and dynamicRoutes (an array)");
         expect(Array.isArray(checker.headers) && Array.isArray(checker.redirects) && ["beforeFiles", "afterFiles", "fallback"].every((k) => Array.isArray(checker.rewrites?.[k])),
           "the router's fs checker has headers, redirects and rewrites { beforeFiles, afterFiles, fallback } as arrays");
-        /* The router only asks appFiles.has(): it also answers for the zones' routes, a set the switch replaces whole. */
+        /* The router only asks appFiles.has(), pageFiles.has() and nextDataRoutes.has(): each also answers for the
+           zones' routes, sets the switch replaces whole. */
+        expect(checker.pageFiles instanceof Set && checker.nextDataRoutes instanceof Set, "the router's fs checker has pageFiles and nextDataRoutes (Sets)");
         const ownHas = Set.prototype.has;
         checker.appFiles.has = (route) => ownHas.call(checker.appFiles, route) || ctx.zoneAppFiles.has(route);
+        checker.pageFiles.has = (route) => ownHas.call(checker.pageFiles, route) || ctx.zonePageFiles.has(route);
+        checker.nextDataRoutes.has = (route) => ownHas.call(checker.nextDataRoutes, route) || ctx.zoneDataRoutes.has(route);
         rules.attach(checker);
         ctx.fsCheckers.add(checker);
         return checker;
@@ -209,9 +237,9 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
   /* A key of a zone's page or route handler: under its mount (zones-cache-handler.cjs routes by it). */
   globalThis.__NEXT_ZONES_IS_ZONE_KEY__ = (key) => typeof key === "string" && ctx.segmentZone.has(segmentOf(key));
   FileSystemCache.prototype.getFilePath = function (key, kind) {
-    if (kind === "APP_PAGE" || kind === "APP_ROUTE") {
+    if (kind === "APP_PAGE" || kind === "APP_ROUTE" || kind === "PAGES") {
       const zone = ctx.segmentZone.get(segmentOf(key));
-      if (zone) return path.join(zone.cacheDir, "app", key);
+      if (zone) return path.join(zone.cacheDir, kind === "PAGES" ? "pages" : "app", key);
     }
     return getFilePath.call(this, key, kind);
   };

@@ -11,6 +11,11 @@
  * - app/: the shell's app/ entries, and each zone's app/<mount>/ under its mount, as real folders of links to files.
  *   A zone's other top-level app files (its root layout, its root not-found) are its own when it runs alone;
  *   composed, the shell's are used, as on Zones.
+ * - pages/: the Pages Router, the same way: each zone's pages<mount>/ (and pages<mount>.tsx) under its mount, and the
+ *   shell's pages. One app has one _app and one _document: when only one zone (or the shell) has its own, it is linked;
+ *   when several have, a composed _app and _document render each page with its own zone's, picked by the page's
+ *   mount, as each zone's pages render in their own documents on Zones. Pages are not linked but re-exported (a stub
+ *   per page, written again when the exports it names change): Turbopack's dev server does not follow a linked page.
  * - public/: the shell's and each zone's public files.
  * - next.config.mjs: the shell's config, with every zone's transpilePackages, env, headers, redirects and rewrites
  *   added, and the zones' aliases as rewrites.
@@ -85,6 +90,136 @@ function commonRoot(dirs) {
   return parts[0].slice(0, n).join(path.sep) || path.sep;
 }
 
+/* A page of the composed pages/: a stub re-exporting the zone's own file, with the exports Next reads off a page
+   (Turbopack's dev server does not follow a linked page; a re-export it does, with HMR on the zone's file). */
+const PAGE_SOURCE = /\.(tsx|ts|jsx|js|mjs)$/;
+const PAGE_EXPORTS = ["getStaticProps", "getStaticPaths", "getServerSideProps", "reportWebVitals", "config", "unstable_getStaticProps", "unstable_getStaticPaths", "unstable_getServerProps", "unstable_getServerSideProps"];
+function pageStub(file, at) {
+  const source = fs.readFileSync(file, "utf8");
+  const named = PAGE_EXPORTS.filter((name) => new RegExp(`export\\s+(async\\s+)?(function\\*?|const|let|var)\\s+${name}\\b|export\\s*\\{[^}]*\\b${name}\\b[^}]*\\}`).test(source));
+  const spec = JSON.stringify(path.relative(path.dirname(at), file).split(path.sep).join("/").replace(/^(?!\.)/, "./").replace(PAGE_SOURCE, ""));
+  return `/* Written by next-zones dev: ${path.basename(file)} of its zone. */\nexport { ${["default", ...named].join(", ")} } from ${spec};\n`;
+}
+function stubPages(source, at) {
+  if (fs.statSync(source).isDirectory()) {
+    fs.mkdirSync(at, { recursive: true });
+    for (const entry of fs.readdirSync(source)) stubPages(path.join(source, entry), path.join(at, entry));
+    return;
+  }
+  if (!PAGE_SOURCE.test(source)) return;
+  const text = pageStub(source, at);
+  fs.mkdirSync(path.dirname(at), { recursive: true });
+  let current = null;
+  try { current = fs.readFileSync(at, "utf8"); } catch {}
+  if (current !== text) fs.writeFileSync(at, text);
+}
+/* Keeps stubbed pages in step while next dev runs: pages added or removed, a stub written again when its exports
+   change (an edit to a page's code reaches next dev through the re-export). */
+function followPages(source, at) {
+  if (!fs.statSync(source).isDirectory()) {
+    fs.watch(source, () => { if (fs.existsSync(source)) stubPages(source, at); });
+    return;
+  }
+  fs.watch(source, { recursive: true }, (event, file) => {
+    if (!file) return;
+    const from = path.join(source, file), to = path.join(at, file);
+    if (fs.existsSync(from)) stubPages(from, to);
+    else fs.rmSync(to, { recursive: true, force: true });
+  });
+}
+
+/* A zone's Pages Router folder, if it has one. */
+const pagesDirOf = (dir) => ["pages", "src/pages"].map((d) => path.join(dir, d)).find((d) => fs.existsSync(d)) ?? null;
+const SYSTEM = /^(_app|_document|_error)\.(tsx|ts|jsx|js)$/;
+const STATIC_ERROR = /^(404|500)\.(tsx|ts|jsx|js)$/;
+
+/*
+ * The Pages Router of the composed app: each zone's pages under its mount, the shell's pages, and one _app and one
+ * _document. With one owner of them, its own are linked; with several, composed ones pick each page's own zone's by
+ * the page's mount (a page outside every zone's mount is the shell's), as on Zones each zone's pages render in their
+ * own documents. _error, 404 and 500 are the shell's, else the first zone's that has them.
+ */
+function composePages({ shell, zones, out }) {
+  const at = path.join(out, "pages");
+  const owners = [];                                       // { name, mount, files: { _app, _document } }
+  const followed = [];                                     // [zone file or folder, its place in pages/]
+  const errorPages = new Map();                            // "404.tsx" → file
+  const shellPages = pagesDirOf(shell.dir);
+  const collect = (z, dir, mount) => {
+    const files = {};
+    for (const entry of fs.readdirSync(dir)) {
+      const file = path.join(dir, entry);
+      const system = SYSTEM.exec(entry);
+      if (system) { if (system[1] === "_error") { if (!errorPages.has("_error")) errorPages.set("_error", file); } else files[system[1]] = file; continue; }
+      if (STATIC_ERROR.test(entry)) { if (!errorPages.has(entry.replace(/\..*$/, ""))) errorPages.set(entry.replace(/\..*$/, ""), file); continue; }
+      if (mount !== "/" && entry !== mount.slice(1) && entry.replace(/\.[^.]+$/, "") !== mount.slice(1)) continue;
+      stubPages(file, path.join(at, entry));
+      followed.push([file, path.join(at, entry)]);
+    }
+    if (files._app || files._document) owners.push({ name: z.name, mount, files });
+  };
+  if (shellPages) collect(shell, shellPages, "/");
+  for (const z of zones) { const dir = pagesDirOf(z.dir); if (dir) collect(z, dir, z.mount); }
+  if (!owners.length && !errorPages.size) return followed;
+  fs.mkdirSync(at, { recursive: true });
+  for (const [name, file] of errorPages) { stubPages(file, path.join(at, `${name}${path.extname(file)}`)); followed.push([file, path.join(at, `${name}${path.extname(file)}`)]); }
+  const spec = (file) => JSON.stringify(path.relative(at, file).split(path.sep).join("/").replace(/^(?!\.)/, "./").replace(/\.(tsx|ts|jsx|js)$/, ""));
+  for (const kind of ["_app", "_document"]) {
+    const having = owners.filter((o) => o.files[kind]);
+    if (!having.length) continue;
+    if (having.length === 1 && owners.length === 1) {
+      const place = path.join(at, `${kind}${path.extname(having[0].files[kind])}`);
+      stubPages(having[0].files[kind], place);
+      followed.push([having[0].files[kind], place]);
+      continue;
+    }
+    /* Several: each page renders with its own zone's (Next's own when its zone has none), picked by its mount. */
+    const zonesOf = having.filter((o) => o.mount !== "/").sort((a, b) => b.mount.length - a.mount.length);
+    const shellOwn = having.find((o) => o.mount === "/");
+    const imports = having.map((o, n) => `import Own${n} from ${spec(o.files[kind])};`).join("\n");
+    const table = `[${zonesOf.map((o) => `{ mount: ${JSON.stringify(o.mount)}, Own: Own${having.indexOf(o)} }`).join(", ")}]`;
+    const fallback = shellOwn ? `Own${having.indexOf(shellOwn)}` : (kind === "_app" ? "NextApp" : "NextDocument");
+    const pick = `const zones: { mount: string; Own: any }[] = ${table};
+const pick = (page: string): any => zones.find((z) => page === z.mount || page.startsWith(\`\${z.mount}/\`))?.Own ?? ${fallback};`;
+    const source = kind === "_app" ? `/* Written by next-zones dev: each page renders with its own zone's _app, as on Zones. */
+import NextApp from "next/app";
+import type { AppProps, AppContext } from "next/app";
+${imports}
+${pick}
+
+export default function ComposedApp(props: AppProps) {
+  const Own = pick(props.router.pathname);
+  return <Own {...props} />;
+}
+/* Only when a zone's own _app has it: without it, Next optimizes pages without data to static ones. */
+if ([...zones.map((z) => z.Own), ${fallback}].some((Own) => Own !== NextApp && Own.getInitialProps)) {
+  (ComposedApp as any).getInitialProps = async (context: AppContext) => {
+    const Own = pick(context.router.pathname);
+    return Own.getInitialProps ? Own.getInitialProps(context) : NextApp.getInitialProps(context);
+  };
+}
+` : `/* Written by next-zones dev: each page renders with its own zone's _document, as on Zones. */
+import NextDocument from "next/document";
+import type { DocumentContext } from "next/document";
+${imports}
+${pick}
+
+export default class ComposedDocument extends NextDocument {
+  static async getInitialProps(context: DocumentContext) {
+    const Own = pick(context.pathname);
+    return Own.getInitialProps ? Own.getInitialProps(context) : NextDocument.getInitialProps(context);
+  }
+  render() {
+    const Own = pick(this.props.__NEXT_DATA__.page);
+    return <Own {...this.props} />;
+  }
+}
+`;
+    fs.writeFileSync(path.join(at, `${kind}.tsx`), source);
+  }
+  return followed;
+}
+
 /** The folder the composed app is written to, for `next dev`. */
 export const composedDir = (zonesDir) => path.join(path.resolve(zonesDir), ".zones-dev");
 
@@ -100,16 +235,24 @@ export async function compose(zonesDir) {
   /* app/ */
   const mounts = new Set(zones.map((z) => z.mount.slice(1)));
   const trees = [];
-  for (const entry of fs.readdirSync(path.join(shell.dir, "app"))) {
+  for (const entry of fs.existsSync(path.join(shell.dir, "app")) ? fs.readdirSync(path.join(shell.dir, "app")) : []) {
     if (mounts.has(entry)) throw new Error(`${shell.name}: app/${entry} is the mount of another zone`);
     trees.push([path.join(shell.dir, "app", entry), path.join(out, "app", entry)]);
   }
   for (const z of zones) {
     const tree = path.join(z.dir, "app", z.mount.slice(1));
-    if (!fs.existsSync(tree)) throw new Error(`${z.name}: no app${z.mount}/`);
+    const pagesDir = pagesDirOf(z.dir);
+    const hasPages = pagesDir && fs.readdirSync(pagesDir).some((e) => e === z.mount.slice(1) || e.replace(/\.[^.]+$/, "") === z.mount.slice(1));
+    if (!fs.existsSync(tree)) {
+      if (!hasPages) throw new Error(`${z.name}: no app${z.mount}/ or pages${z.mount}/`);
+      continue;
+    }
     trees.push([tree, path.join(out, "app", z.mount.slice(1))]);
   }
   for (const [source, at] of trees) mirror(source, at);
+
+  /* pages/ */
+  const pagesFollowed = composePages({ shell, zones, out }) ?? [];
 
   /* public/ */
   for (const z of [shell, ...zones]) {
@@ -151,7 +294,7 @@ export async function compose(zonesDir) {
   /* paths are relative to this tsconfig, which needs no baseUrl (deprecated from TypeScript 6). */
   const { baseUrl: _, ...compilerOptions } = tsconfig.compilerOptions ?? {};
   tsconfig.compilerOptions = { ...compilerOptions, paths: Object.fromEntries(Object.entries(paths).map(([k, v]) => [k, v.map((t) => (t.startsWith(".") ? t : `./${t}`))])) };
-  tsconfig.include = ["next-env.d.ts", "app/**/*.ts", "app/**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"];
+  tsconfig.include = ["next-env.d.ts", "app/**/*.ts", "app/**/*.tsx", "pages/**/*.ts", "pages/**/*.tsx", ".next/types/**/*.ts", ".next/dev/types/**/*.ts"];
   fs.writeFileSync(path.join(out, "tsconfig.json"), JSON.stringify(tsconfig, null, 2) + "\n");
 
   /* The shell's other project files: proxy; instrumentation, unless a zone has its own (below). */
@@ -234,13 +377,14 @@ export default (phase) => mergeConfigs(${JSON.stringify({
     loader: fileURLToPath(new URL("./compose-alias-loader.cjs", import.meta.url)),
   })}, phase);
 `);
-  return { out, shell, zones, trees };
+  return { out, shell, zones, trees, pagesFollowed };
 }
 
 /** Composes, then runs `next dev` on the result. */
 export async function composeDev({ zonesDir, port = 3000 }) {
-  const { out, shell, zones, trees } = await compose(zonesDir);
+  const { out, shell, zones, trees, pagesFollowed } = await compose(zonesDir);
   for (const [source, at] of trees) if (fs.statSync(source).isDirectory()) follow(source, at);
+  for (const [source, at] of pagesFollowed) followPages(source, at);
   console.log(`next-zones dev: ${shell.name} at /, ${zones.map((z) => `${z.name} at ${z.mount}`).join(", ")}`);
   const next = createRequire(path.join(shell.dir, "package.json")).resolve("next/dist/bin/next");
   const child = spawn(process.execPath, [next, "dev", "-p", String(port)], { cwd: out, stdio: "inherit", env: { ...process.env, NEXT_ZONES_BUILD: "dev" } });

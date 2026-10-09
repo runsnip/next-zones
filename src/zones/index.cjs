@@ -85,6 +85,10 @@ function createZones(options = {}) {
   if (created) throw new Error("next-zones: one Zones per process (it hooks Node's module loader and Next's internals)");
   if (!options.shell) throw new Error("next-zones: createZones({ shell }) is required");
   created = true;
+  /* Zones serves production builds, as `next start` does, which sets NODE_ENV to "production" when it is unset before
+     anything loads: packages read it once, as they load (react picks its development or production build by it), and a
+     Pages Router page renders with react from node_modules, against react-dom's production server. */
+  process.env.NODE_ENV ||= "production";
   const ctx = createContext(options);
   claimed = ctx.store;
   /* What Zones relies on in Next: on a Next it was not checked against, it refuses to start. The version and the

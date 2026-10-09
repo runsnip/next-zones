@@ -1,6 +1,6 @@
 # What is supported
 
-Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router. Key:
+Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router and Pages Router. Key:
 - ✅ works: verified in a browser or over HTTP;
 - 🟡 expected to work: not verified yet;
 - 🔧 planned: not done yet; where it would otherwise fail silently, refused at install until it is;
@@ -25,7 +25,8 @@ Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router. Key:
 
 | | |
 |---|---|
-| `<Link>` shell ↔ zone and zone ↔ zone, Back/Forward, prefetch | ✅ soft, state kept |
+| `<Link>` shell ↔ zone and zone ↔ zone, Back/Forward, prefetch (App Router pages) | ✅ soft, state kept |
+| `<Link>` to or from a zone's Pages Router page | ✅ soft inside that zone; a new document to anywhere else (Next's rule between the routers; see [Zones on the Pages Router](pages-router.md)) |
 | `useRouter`, `usePathname`, `useParams`, `useSearchParams`, `router.push` into another zone | ✅ |
 | `redirect()` into another zone, `notFound()` | ✅ |
 | `permanentRedirect`, `forbidden`, `unauthorized` | 🟡 |
@@ -67,7 +68,8 @@ Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router. Key:
 | A shell with its own `cacheHandler` (a remote cache) | ✅ (it keeps every key but the zones' pages, which stay per version) |
 | A zone run alone (`next start`, `next dev`), with its aliases | ✅ ([running alone](configuration.md#running-a-zone-alone)) |
 | `next dev` across zones | ✅ [`next-zones dev`](cli.md#next-zones-dev): HMR and soft navigation, every zone at once |
-| Pages Router (`pages/`) in a zone | 🔧 refused at install today (Next's own `/404` and `/500` aside): use `app/` |
+| Pages Router (`pages/`) in a zone: static pages, `getStaticProps` (prerendered, `fallback`, `revalidate`), `getServerSideProps`, its own `_app` and `_document`, live installs | ✅ in every mode ([Zones on the Pages Router](pages-router.md)) |
+| A zone's `pages/api/` (served at `/api/…`, outside its mount) | ⛔ (route handlers under the mount, `app/<mount>/…/route.ts`, or the shell's) |
 | `output: "export"` | ✅ both modes: one static site, soft navigation between zones ([build and start](cli.md#build-and-start)) |
 | `output: "standalone"` | ✅ both modes: the folder alone is the deploy ([build and start](cli.md#build-and-start)) |
 

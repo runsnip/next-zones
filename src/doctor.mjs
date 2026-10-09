@@ -209,20 +209,32 @@ export async function doctor({ dirs, store, url, fast = false, print = console.l
         if (shellServes(segment)) fail(z.name, `/${segment} is the shell's too (its app/${segment})`, `a segment has one owner: move the shell's app/${segment} away, or mount the zone elsewhere`);
       }
     }
-    /* Pages Router routes: refused at install (stage.cjs). Next's own pages (_app, _document, _error, 404, 500) are not. */
-    for (const pagesDir of ["pages", "src/pages"].map((d) => path.join(z.dir, d)).filter((d) => fs.existsSync(d))) {
-      const routes = fs.readdirSync(pagesDir, { recursive: true }).map(String).filter((f) => SOURCE.test(f) && !/^(_app|_document|_error|404|500)\.\w+$/.test(f));
-      if (routes.length) fail(z.name, `has Pages Router routes (${path.relative(z.dir, pagesDir)}/${routes.slice(0, 3).join(", ")}${routes.length > 3 ? ", …" : ""})`, "Zones serves a zone's app/ routes only: move them into app" + z.mount + "/");
-    }
+    /* Its routes: under app<mount>/ (App Router), pages<mount>/ or pages<mount>.tsx (Pages Router), or both. */
+    const segment = z.mount.slice(1);
     const appDir = ["app", "src/app"].map((d) => path.join(z.dir, d)).find((d) => fs.existsSync(d));
-    if (!appDir) { fail(z.name, "has no app/ folder", "zones use the App Router"); continue; }
-    if (!fs.existsSync(path.join(appDir, z.mount.slice(1)))) fail(z.name, `has no app${z.mount}/`, `its routes live under app${z.mount}/`);
-    for (const entry of fs.readdirSync(appDir)) {
-      if (entry === z.mount.slice(1) || ROOT_ONLY.test(entry)) continue;
-      fail(z.name, `app/${entry} is outside its mount ${z.mount}`, `move it under app${z.mount}/, or into the shell if it belongs at the root`);
+    const pagesDir = ["pages", "src/pages"].map((d) => path.join(z.dir, d)).find((d) => fs.existsSync(d));
+    if (!appDir && !pagesDir) { fail(z.name, "has no app/ or pages/ folder", `its routes live under app${z.mount}/ or pages${z.mount}/`); continue; }
+    const pagesHasMount = pagesDir && fs.readdirSync(pagesDir).some((e) => e === segment || e.replace(/\.[^.]+$/, "") === segment);
+    if (!(appDir && fs.existsSync(path.join(appDir, segment))) && !pagesHasMount) fail(z.name, `has no app${z.mount}/ or pages${z.mount}/`, `its routes live under app${z.mount}/ or pages${z.mount}/`);
+    if (appDir) {
+      for (const entry of fs.readdirSync(appDir)) {
+        if (entry === segment || ROOT_ONLY.test(entry)) continue;
+        fail(z.name, `app/${entry} is outside its mount ${z.mount}`, `move it under app${z.mount}/, or into the shell if it belongs at the root`);
+      }
     }
-    for (const file of walk(appDir)) {
-      if (SOURCE.test(file) && /export\s+const\s+runtime\s*=\s*["']edge["']/.test(fs.readFileSync(file, "utf8"))) {
+    if (pagesDir) {
+      /* Next's own pages (_app, _document, _error, 404, 500) are the zone's, used by its pages; every other page lives
+         under the mount. pages/api/ is served at /api/…, outside it. */
+      for (const entry of fs.readdirSync(pagesDir)) {
+        if (entry === segment || entry.replace(/\.[^.]+$/, "") === segment || /^(_app|_document|_error|404|500)\.\w+$/.test(entry)) continue;
+        const rel = path.relative(z.dir, path.join(pagesDir, entry));
+        fail(z.name, `${rel} is outside its mount ${z.mount}`, entry === "api"
+          ? `pages/api/ is served at /api/…, which ${z.mount} does not own: write the handlers as app${z.mount}/…/route.ts, or put them in the shell`
+          : `move it under pages${z.mount}/, or into the shell if it belongs at the root`);
+      }
+    }
+    for (const file of [appDir, pagesDir].filter(Boolean).flatMap((d) => [...walk(d)])) {
+      if (SOURCE.test(file) && /export\s+const\s+(runtime\s*=\s*["']edge["']|config\s*=\s*\{[^}]*runtime\s*:\s*["'](experimental-)?edge["'])/.test(fs.readFileSync(file, "utf8"))) {
         fail(z.name, `${path.relative(z.dir, file)} uses the edge runtime`, "edge routes are not served by Zones yet: use the Node.js runtime");
       }
     }

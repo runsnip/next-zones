@@ -10,11 +10,16 @@
  */
 /**
  * The page path a cache key is for. Next keys a response by its path ("/blog/1", "/blog/page:…"), and from 16.3.8 under
- * the route that owns it: "/route-cache/<kind>/<sha256 of the source route>/$/blog/1". Zones routes and drops entries
- * by that path's first segment.
+ * the route that owns it: "/route-cache/<kind>/<sha256 of the source route>/$/blog/1". The router keys a Pages Router
+ * page's data the way it is requested, "/_next/data/<build id>/docs/a.json". Zones routes and drops entries by that
+ * page path's first segment.
  */
 function keyPath(key) {
   const k = String(key);
+  if (k.startsWith("/_next/data/")) {
+    const at = k.indexOf("/", "/_next/data/".length);
+    if (at !== -1) return k.slice(at);
+  }
   if (k.startsWith("/route-cache/")) {
     const at = k.indexOf("/$/");
     if (at !== -1) return k.slice(at + 2);

@@ -16,14 +16,19 @@ const { missingBuildOptions } = require("../build-options.cjs");
 /* The config keys that shape every URL or image, compared with the shell's at install. */
 const CONFIG_KEYS = ["basePath", "i18n", "trailingSlash", "assetPrefix", "skipTrailingSlashRedirect", "cacheComponents", "partialPrefetching", "images"];
 /* Bumped when what describeBuild() returns changes: a zone.json of another format is described again. */
-const FORMAT = 2;
+const FORMAT = 3;
+/* Pages every Pages Router build has, which route nothing of the zone's own (Next's BLOCKED_PAGES, and its static
+   404 and 500). */
+const SYSTEM_PAGES = new Set(["/_app", "/_document", "/_error", "/404", "/500"]);
 
 const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 
 function describeBuild(dist) {
   const serverDir = path.join(dist, "server");
-  const appPathsManifest = readJson(path.join(serverDir, "app-paths-manifest.json"));
-  const appPathRoutes = readJson(path.join(dist, "app-path-routes-manifest.json"));
+  /* A zone may use the App Router, the Pages Router, or both: each manifest is there only when its router is. */
+  const readOptional = (file) => (fs.existsSync(file) ? readJson(file) : {});
+  const appPathsManifest = readOptional(path.join(serverDir, "app-paths-manifest.json"));
+  const appPathRoutes = readOptional(path.join(dist, "app-path-routes-manifest.json"));
   /* Pages, relative to the build (Zones makes them absolute where the build is stored), without the zone's own
      not-found and global-error. */
   const appPaths = {};
@@ -33,6 +38,15 @@ function describeBuild(dist) {
     appPaths[page] = path.join("server", file);
     routes.push(appPathRoutes[page]);
   }
+  /* Pages Router pages, relative to the build like appPaths; its _app, _document and _error apart (each page bundle
+     carries the zone's own _app and _document; Next still loads the server's, so a shell without them gets these). */
+  const pagesManifest = readOptional(path.join(serverDir, "pages-manifest.json"));
+  const pagePaths = {}, pageSystem = {};
+  for (const [page, file] of Object.entries(pagesManifest)) {
+    if (SYSTEM_PAGES.has(page)) { if (page.startsWith("/_")) pageSystem[page] = path.join("server", file); continue; }
+    pagePaths[page] = path.join("server", file);
+  }
+  const pageRoutes = Object.keys(pagePaths);
   const middleware = readJson(path.join(serverDir, "middleware-manifest.json"));
   const functionsFile = path.join(serverDir, "functions-config-manifest.json");
   const functions = fs.existsSync(functionsFile) ? readJson(functionsFile).functions ?? {} : {};
@@ -50,7 +64,12 @@ function describeBuild(dist) {
     buildId: fs.readFileSync(path.join(dist, "BUILD_ID"), "utf8").trim(),
     appPaths,
     routes,
-    dynamicRoutes: routesManifest.dynamicRoutes.filter((r) => !r.skipInternalRouting && routes.includes(r.page)),
+    pagePaths,
+    pageRoutes,
+    pageSystem,
+    /* The pages with a /_next/data route (getStaticProps, getServerSideProps): the router serves those as JSON. */
+    dataRoutes: (routesManifest.dataRoutes ?? []).filter((r) => pageRoutes.includes(r.page)).map((r) => ({ page: r.page, dataRouteRegex: r.dataRouteRegex })),
+    dynamicRoutes: routesManifest.dynamicRoutes.filter((r) => !r.skipInternalRouting && (routes.includes(r.page) || pageRoutes.includes(r.page))),
     rules: {
       headers: own(routesManifest.headers), redirects: own(routesManifest.redirects),
       beforeFiles: own(rewrites.beforeFiles), afterFiles: own(rewrites.afterFiles), fallback: own(rewrites.fallback),

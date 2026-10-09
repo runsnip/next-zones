@@ -75,6 +75,7 @@ step("build the Cache Components shell", () => runWith(nextBin, ["build"], path.
 const build = (dir, zone, version, store) => run(process.execPath, [path.join(root, "tools", "build-zone.mjs"), dir, zone, version, "--store", store]);
 step("build the zone images", () => {
   build("fixtures", "blog", "1", ".zones-store"); build("fixtures", "blog", "2", ".zones-store"); build("fixtures", "shop", "1", ".zones-store"); build("fixtures", "shop", "2", ".zones-store"); build("fixtures", "wide", "1", ".zones-store");
+  build("fixtures", "docs", "1", ".zones-store"); build("fixtures", "docs", "2", ".zones-store");
   build("fixtures-cc", "notes", "1", ".zones-store-cc");
 });
 let report = "";

@@ -2,7 +2,8 @@
 
 ## Zone
 
-A zone is a normal Next.js app (App Router), so it builds with `next build` and runs alone with `next start`. It
+A zone is a normal Next.js app (the App Router, the [Pages Router](pages-router.md), or both), so it builds with
+`next build` and runs alone with `next start`. It
 declares itself in its `next.config` with [`zoneConfig`](configuration.md). A zone never needs next-zones to run:
 - **On its own**, it is just a Next app.
 - **Together with other zones**, it is served by Zones, or built with them into one Next app (the composer).

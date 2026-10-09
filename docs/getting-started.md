@@ -1,6 +1,7 @@
 # Getting started
 
-> Requires Next.js 16.3.6, 16.3.7, 16.3.8 or 16.4.0, App Router, and Node.js 24 or later.
+> Requires Next.js 16.3.6, 16.3.7, 16.3.8 or 16.4.0 and Node.js 24 or later. Zones use the App Router, the
+> [Pages Router](pages-router.md), or both; this guide uses the App Router.
 
 ## The quick way
 

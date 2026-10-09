@@ -1045,3 +1045,44 @@ runtime has not loaded counts by its id. Each factory is keyed once.
 
 **Then D10 settled:** `next-zones build` builds every zone where it is (no copy, Turbopack's cache reused by the next
 version). The checks: 49/49 with images built so.
+
+## The Pages Router (Next 16.3.8, 16.4.0, 16.3.6)
+
+A zone on the Pages Router (`fixtures/docs`: its own `_app` and `_document`, a static page, `getStaticProps` with
+`getStaticPaths` and a blocking fallback, `revalidate`, `getServerSideProps`, a route handler under its mount) under
+Zones, in `next-zones dev` (with `fixtures/wiki`, a second Pages Router zone with its own `_app` and `_document`), in mode
+`"single"` and with `output: "standalone"` in both modes. Checks: `pagesrouter.mjs`, `composedpages.mjs`,
+`singlepages.mjs`, `singlepagesstandalone.mjs`, `zonesstandalone.mjs`; 55 of 55 on Next 16.3.8, 16.4.0 and 16.3.6.
+
+**How.** Next never renders a Pages Router page and an App Router page in one document, so a zone's Pages Router page
+renders whole in its own build: Zones merges its pages into the server's pages manifest, the router's page files, data
+routes and dynamic routes, and on Next 16.3 the pages matchers; a Pages route module's `loadManifests` reads the
+manifests that describe a build (its id, its build manifest, its react-loadable and font manifests) from the zone's
+build; a `/_next/data/<zone's build id>/…` request is read as the shell's. Found on the way:
+- a page bundle that imports an ES module from outside (an async module) is a promise of its exports when Next
+  requires it: its route module is bound to its build when the promise settles;
+- `react` loaded as its development build next to react-dom's production server ("dispatcher.getOwner is not a
+  function"): Zones now sets `NODE_ENV` to `"production"` when it is unset, as `next start` does;
+- `@runsnip/next-zones/client` imported `next/navigation` without its extension, which Node's ESM loader cannot find
+  when a Pages Router build leaves the package external: now `next/navigation.js`;
+- an `import()` of an external from a zone's server code followed the image's link to the build machine (a second
+  `react`, "reading 'useContext'"): Zones resolves a zone's `import` from the shell's `node_modules` through Node's module
+  hooks, as it did `require`; a standalone folder gets the zones' externals traced in.
+- a tab on a version just replaced asked for that version's chunks (404): the static files of every image in the
+  store are served.
+
+**Latency.** Sequential requests after a warm-up (`tools/bench/latency.mjs`, 3000 per path, 300 warm-up), Node 24.16,
+Apple M1, metrics on in Zones. The reference is the same pages in mode `"single"`, one `next start` with the same shell
+(its proxy runs on every request in both). Two alternating rounds, p50 in ms:
+
+| Path | Zones | One app (`next start`) |
+|---|---|---|
+| `/docs/ssr` (`getServerSideProps`) | 0.98, 1.07 | 0.85, 0.99 |
+| `/docs` (`getStaticProps`, prerendered) | 0.69, 0.65 | 0.58, 0.60 |
+| `/_next/data/<id>/docs/ssr.json` | 0.44, 0.45 | 0.43, 0.39 |
+
+Before three changes the profile pointed at, Zones' `/docs/ssr` was 1.32 ms: a `public/` lookup on the file system for
+every request (a zone's public files are now listed once per version), the page bundle resolved again on every render
+(bound once), and the module hook's cheap tests run last. In a CPU profile of 6000 `/docs/ssr` requests, Zones' own
+code is now about 5% of the busy time: the asynchronous contexts that bind each render to its build (about 2%), the
+metrics (about 1.6%), the request's routing to a zone; the rest is Next's.

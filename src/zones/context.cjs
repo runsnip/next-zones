@@ -24,6 +24,9 @@ function createContext(options) {
     segmentZone: new Map(),           // first path segment ("blog") → the zone mounted there
     segmentGeneration: new Map(),     // first path segment → generation, bumped by a switch (cached misses)
     zoneAppFiles: new Set(),          // every installed zone's routes, for the router's appFiles
+    zonePageFiles: new Set(),         // every installed zone's Pages Router pages, for the router's pageFiles
+    zoneDataRoutes: new Set(),        // the zones' pages with a /_next/data route, for the router's nextDataRoutes
+    zoneBuildIds: new Set(),          // the zones' build ids: a /_next/data request under one is read as the shell's
     mergedManifest: null,             // the app-paths overlay, built by prepare, assigned by the switch
     revision: 0,                      // bumped by every switch: a plan made on an older one is redone
     placed: new Map(),                // zone name → what its last switch added (matchers, pages, routes)

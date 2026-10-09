@@ -38,12 +38,16 @@ client state is kept.
 Without it, a tab still gets new versions of dynamic pages at once. A static page it has already visited may keep its
 old version until the router's stale time (5 minutes by default) or a `router.refresh()`.
 
+A zone on the Pages Router renders it in its own `_app`: its pages run in documents of their own, so after a swap the
+tab's next navigation loads a new document, the version just installed (see [Zones on the Pages
+Router](pages-router.md#live-installs)).
+
 When a zone runs alone, or the events endpoint is not declared, there is no event stream and `<ZoneUpdates />` does
 nothing.
 
 ## Requirements
 
-- **Next.js 16.3.6, 16.3.7, 16.3.8 or 16.4.0, App Router** (see [supported Next versions](zones.md#supported-next-versions)).
+- **Next.js 16.3.6, 16.3.7, 16.3.8 or 16.4.0**, App Router or [Pages Router](pages-router.md) (see [supported Next versions](zones.md#supported-next-versions)).
 - **Every zone is built with the same Next, React and react-dom as the server that runs them.** The build records
   their versions, and a zone built with others is refused at install.
 - **One workspace.** The zones and the shell share one `node_modules`. A zone's dependencies, its

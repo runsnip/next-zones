@@ -148,7 +148,19 @@ function chunkGroups(file) {
   for (const items of pushed) collect(items.slice(1), fileStrict);
   return groups;
 }
-const chunksOf = (root) => fs.readdirSync(path.join(root, "static", "chunks")).filter((f) => f.endsWith(".js") && !isRuntime(f));
+/* A build's client chunks that may run in the shell's document: not the ones only its Pages Router pages load, which
+   run in the zone's own documents, with the zone's own runtime (build-manifest.json lists them by page). */
+const pagesOnly = (root) => {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, "build-manifest.json"), "utf8"));
+    const app = new Set(manifest.rootMainFiles ?? []);
+    return new Set(Object.values(manifest.pages ?? {}).flat().filter((f) => !app.has(f)).map((f) => path.basename(f)));
+  } catch { return new Set(); }
+};
+const chunksOf = (root) => {
+  const skip = pagesOnly(root);
+  return fs.readdirSync(path.join(root, "static", "chunks")).filter((f) => f.endsWith(".js") && !isRuntime(f) && !skip.has(f));
+};
 
 /* What the browser may hold: the shell's modules, and what earlier installs reported. */
 const known = new Map(Object.entries(knownIn ?? {}).map(([id, hashes]) => [id, new Set(hashes)]));

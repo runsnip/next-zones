@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 
 const CHECKS = ["browse", "features", "bound", "swap", "links", "alias", "media", "routing", "rules", "routes", "proxy",
-  "revalidate", "instrumentation", "shared", "concurrent", "swapload", "signal", "external", "params", "miss", "many", "cc", "sharedver", "context", "standalone", "composed", "doctor", "init", "contract", "collect", "integrity", "health", "pull", "endpoints", "endpointsoff", "endpointsbase", "localdeps", "prune", "release", "single", "singlestandalone", "singleexport", "zonesstandalone", "zonesexport", "ownhandler", "reclaim", "lrumem", "isrswap", "widths", "leak", "metrics", "pages"];
+  "revalidate", "instrumentation", "shared", "concurrent", "swapload", "signal", "external", "params", "miss", "many", "cc", "sharedver", "context", "standalone", "composed", "doctor", "init", "contract", "collect", "integrity", "health", "pull", "endpoints", "endpointsoff", "endpointsbase", "localdeps", "prune", "release", "single", "singlestandalone", "singleexport", "zonesstandalone", "zonesexport", "ownhandler", "reclaim", "lrumem", "isrswap", "widths", "leak", "metrics", "pagesrouter", "composedpages", "singlepages", "singlepagesstandalone"];
 /* Checks that need their own setup: the environment for Zones and the check. */
 const SETUP = {
   /* A non-public env variable only the server may read (leak.mjs looks for it in everything a browser can fetch). */
@@ -69,7 +69,7 @@ const SETUP = {
 };
 /* Checks slower than 2 minutes: init installs a new workspace from the registry, then runs doctor and next dev
    (2 min 46 s measured); release builds a shell and three zone images; single builds one app and three apps. */
-const TIMEOUT = { init: 360_000, release: 600_000, single: 600_000, ownhandler: 300_000 };
+const TIMEOUT = { composedpages: 300_000, singlepages: 600_000, singlepagesstandalone: 600_000, init: 360_000, release: 600_000, single: 600_000, ownhandler: 300_000 };
 const EXPECTED = /may hold state|boom|broken on purpose|NoFallbackError|metadataBase|Running next\.config|Zones on :3900|next-zones: pruned|digest|^\s*at |^\s*[{}]|^\s*$/i;
 const chosen = process.argv.slice(2).length ? process.argv.slice(2) : CHECKS;
 /* The spike installs the package as a copy (install-links: Turbopack refuses a link out of its root), so the copy

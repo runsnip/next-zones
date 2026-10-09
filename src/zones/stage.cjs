@@ -22,6 +22,8 @@ const runWorker = (file, workerData) => new Promise((resolve, reject) => {
   worker.once("error", reject);
 });
 
+const readOptional = (file) => (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {});
+
 function createStaging(ctx) {
   /* The shell's own facts, read once: they do not change while Zones runs. */
   let shellFacts = null;
@@ -30,7 +32,11 @@ function createStaging(ctx) {
     const dist = path.join(ctx.shell, ".next");
     const config = JSON.parse(fs.readFileSync(path.join(dist, "required-server-files.json"), "utf8")).config;
     shellFacts = {
-      routes: Object.values(JSON.parse(fs.readFileSync(path.join(dist, "app-path-routes-manifest.json"), "utf8"))),
+      /* Its app routes and its Pages Router pages (a shell may have either, or both). */
+      routes: [
+        ...Object.values(readOptional(path.join(dist, "app-path-routes-manifest.json"))),
+        ...Object.keys(readOptional(path.join(dist, "server", "pages-manifest.json"))).filter((p) => !["/_app", "/_document", "/_error", "/404", "/500"].includes(p)),
+      ],
       buildId: fs.readFileSync(path.join(dist, "BUILD_ID"), "utf8").trim(),
       config: Object.fromEntries(CONFIG_KEYS.map((key) => [key, config[key] ?? null])),
     };
@@ -82,6 +88,10 @@ function createStaging(ctx) {
     const serverDir = path.join(dist, "server");
     const appPaths = Object.fromEntries(Object.entries(info.appPaths).map(([page, file]) => [page, path.join(dist, file)]));
     const routes = info.routes;
+    /* Its Pages Router pages, absolute like appPaths; and its _app, _document and _error, for a shell without its own. */
+    const absolute = (files) => Object.fromEntries(Object.entries(files ?? {}).map(([page, file]) => [page, path.join(dist, file)]));
+    const pagePaths = absolute(info.pagePaths), pageSystem = absolute(info.pageSystem);
+    const pageRoutes = info.pageRoutes ?? [];
     /* One proxy and one instrumentation per server, the shell's: a zone's own would silently not run (an auth gate
        skipped), so such a zone is refused. Its logic belongs in the shell. */
     if (info.proxy) throw new ZoneError(`zone "${name}" has its own proxy.ts, which would not run under Zones: move it into the shell's proxy`);
@@ -113,12 +123,6 @@ function createStaging(ctx) {
       }
     }
     if (identity.clientInstrumentation) throw new ZoneError(`zone "${name}" has an instrumentation-client file, which runs only in its own documents, not when it is reached from the shell: move it into the shell's`);
-    /* Pages Router routes: Zones serves a zone's app/ routes only, so a pages/ route would answer the shell's 404. Next's
-       own pages (/_app, /_document, /_error, /404, /500) are in every build. */
-    let pagesManifest = {};
-    try { pagesManifest = JSON.parse(await fs.promises.readFile(path.join(serverDir, "pages-manifest.json"), "utf8")); } catch {}
-    const pagesRoutes = Object.keys(pagesManifest).filter((route) => !["/_app", "/_document", "/_error", "/404", "/500"].includes(route));
-    if (pagesRoutes.length) throw new ZoneError(`zone "${name}" has Pages Router routes (${pagesRoutes.join(", ")}), not supported under Zones yet: move them into app/`);
     /* Edge routes have their own manifests and sandbox, not proved under Zones. */
     if (info.edgeFunctions.length) throw new ZoneError(`zone "${name}" has edge routes (${info.edgeFunctions.join(", ")}), not supported under Zones yet: use the Node.js runtime`);
     /* What shapes every URL must be the shell's. The image optimizer runs with the shell's images config: a zone that
@@ -130,7 +134,7 @@ function createStaging(ctx) {
     const differs = ["basePath", "i18n", "trailingSlash", "assetPrefix", "skipTrailingSlashRedirect", "cacheComponents", "partialPrefetching"]
       .filter((key) => JSON.stringify(info.config[key] ?? null) !== JSON.stringify(shellNow.config[key] ?? null));
     if (differs.length) throw new ZoneError(`zone "${name}": ${differs.join(", ")} must equal the shell's (${differs.map((k) => `${k}: ${JSON.stringify(info.config[k])} vs ${JSON.stringify(shellNow.config[k])}`).join("; ")})`);
-    const outside = routes.filter((r) => r !== mount && !r.startsWith(`${mount}/`));
+    const outside = routes.concat(pageRoutes).filter((r) => r !== mount && !r.startsWith(`${mount}/`));
     if (outside.length) throw new ZoneError(`zone "${name}" owns ${mount}, but has routes outside it: ${outside.join(", ")}`);
     /* No other zone, and not the shell, may serve under this mount. */
     for (const z of ctx.zones.values()) {
@@ -157,6 +161,7 @@ function createStaging(ctx) {
       name, mount, aliases, rules, publicDir, version: identity.version,
       instrumentationFile: info.instrumentation ? path.join(serverDir, "instrumentation.js") : null,
       dist, appPaths, routes, dynamicRoutes, actions: info.actions, prerender: info.prerender, cacheDir,
+      pagePaths, pageRoutes, pageSystem, dataRoutes: info.dataRoutes ?? [], buildId,
       seed: { serverDir, buildId, shellBuildId }, buildKey: key,
       timing: { verify: t1 - t0, described: !(identity.install?.format === FORMAT) },
     };
@@ -172,8 +177,14 @@ function createStaging(ctx) {
     await fs.promises.rename(temp, file);
   }
 
-  const ANALYSIS = "m13";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
+  const ANALYSIS = "m14";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
   async function analyseZoneClient(staged) {
+    /* A zone without App Router pages has no client code that runs in the shell's document: its Pages Router pages
+       load in documents of their own, with the zone's own runtime and chunks, as built. */
+    if (!Object.keys(staged.appPaths).length) {
+      Object.assign(staged, { mainChunks: [], mainChunkFile: null, idMap: {}, chunkDir: null, chunkUrls: {}, zoneModules: null, cacheDir: `${staged.cacheDir}--pages`, analysisFiles: [], warnings: [] });
+      return;
+    }
     const fingerprint = crypto.createHash("sha1").update(JSON.stringify([ANALYSIS, ctx.clientKnown ? [...ctx.clientKnown].map(([id, h]) => [id, [...h].sort()]).sort() : "shell"])).digest("hex").slice(0, 12);
     const base = path.join(ctx.cacheDir, staged.name, `${staged.buildKey}--${fingerprint}`);
     const resultFile = `${base}-client.json`;
@@ -224,8 +235,8 @@ function createStaging(ctx) {
      temporary folder renamed at the end, so a cache is never half seeded. */
   async function seedCache(staged) {
     if (fs.existsSync(staged.cacheDir)) return;
-    const { cacheDir, mainChunks, routes, idMap, chunkUrls, seed: { serverDir, buildId, shellBuildId } } = staged;
-    await runWorker("zone-seed.cjs", { cacheDir, mainChunks, routes, idMap, chunkUrls, serverDir, buildId, shellBuildId });
+    const { cacheDir, mainChunks, routes, pageRoutes, idMap, chunkUrls, seed: { serverDir, buildId, shellBuildId } } = staged;
+    await runWorker("zone-seed.cjs", { cacheDir, mainChunks, routes, pageRoutes, idMap, chunkUrls, serverDir, buildId, shellBuildId });
   }
 
   return { stage, analyseZoneClient, seedCache, verifyImage, markVerified };

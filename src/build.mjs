@@ -173,7 +173,7 @@ export async function buildWorkspace({ dir = ".", zones: only = [], version, sto
       if (isStandalone(shellDist)) {
         /* Next's output: "standalone": linked into the shell's standalone folder, which is then the whole deploy; what
            the zones' server code needs of Next that the shell's trace did not reach is traced in. */
-        const { standaloneServerDir, traceInto } = await import("./standalone.mjs");
+        const { standaloneServerDir, traceInto, bringZoneExternals } = await import("./standalone.mjs");
         const serverDir = standaloneServerDir(shell.dir);
         log(`▸ linking ${images.length} zones into one standalone app`);
         await linkApp({ shellDir: shell.dir, images, out: serverDir, policy, into: true });
@@ -181,6 +181,7 @@ export async function buildWorkspace({ dir = ".", zones: only = [], version, sto
         const collect = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d, e.name); if (e.isDirectory()) collect(f); else if (/\.js$/.test(e.name)) entries.push(f); } };
         for (const image of images) collect(path.join(image.dir, "server"));
         await traceInto({ shellDir: shell.dir, root: path.join(shell.dir, ".next", "standalone"), entries });
+        await bringZoneExternals({ shellDir: shell.dir, root: path.join(shell.dir, ".next", "standalone"), homes: images.map((i) => path.join(serverDir, ".next", "zones", i.zone)) });
         result.server = path.join(serverDir, "server.js");
       } else {
         log(`▸ linking ${images.length} zones into one app`);

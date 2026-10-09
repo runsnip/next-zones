@@ -12,7 +12,12 @@
  *   (zones/payload.cjs);
  * - the client side: the same analysis as an install (zones/zone-client.cjs), its chunks and main chunk in
  *   .next/static;
- * - the images' public files; the shell's config as the app's next.config, from what its build recorded.
+ * - the images' public files; the shell's config as the app's next.config, from what its build recorded;
+ * - a zone's Pages Router pages, as Zones serves them: each renders whole in its own build (its document, _app, build
+ *   id and chunks). The pages manifest points into the image, its prerendered pages and data are where Next reads
+ *   them, its data routes are the app's, a request under its build id is rewritten to the app's, and the app's
+ *   instrumentation.js (which Next loads before any route renders) makes its route modules read their own build's
+ *   manifests from the image.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -87,6 +92,9 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
   const prerender = readJson(path.join(dist, "prerender-manifest.json"), {});
   const actions = readJson(path.join(server, "server-reference-manifest.json"), { node: {}, edge: {} });
   const fonts = readJson(path.join(server, "next-font-manifest.json"), { app: {}, pages: {}, appUsingSizeAdjust: false, pagesUsingSizeAdjust: false });
+  const pagesManifest = readJson(path.join(server, "pages-manifest.json"), {});
+  const { escapeStringRegexp } = fromShell("next/dist/shared/lib/escape-regexp");
+  const pagesZones = [];                                   // { zone, mount }: zones with Pages Router pages
   const chunksDir = path.join(dist, "static", "chunks");
   let known = null;
   const linked = [];
@@ -117,8 +125,12 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
       }
     }
 
-    /* The client side, as an install analyses it: the chunks it writes again go straight into .next/static. */
-    const analysis = await runWorker("zone-client.cjs", { dist: dir, shellDist, buildKey, outDir: chunksDir, known });
+    /* The client side, as an install analyses it: the chunks it writes again go straight into .next/static. A zone
+       without App Router pages has nothing that runs in the shell's document. */
+    const hasAppPages = Object.keys(readJson(path.join(dir, "server", "app-paths-manifest.json"), {})).some(own);
+    const analysis = hasAppPages
+      ? await runWorker("zone-client.cjs", { dist: dir, shellDist, buildKey, outDir: chunksDir, known })
+      : { missingUsed: [], shellModules: null, zoneModules: {}, mainItems: null, chunkMap: {}, idMap: {} };
     if (analysis.missingUsed.length) throw new Error(`${zone} uses client runtime features the shell's runtime lacks (${analysis.missingUsed.join(", ")}): import @runsnip/next-zones/client in the shell (render <ZoneUpdates />), which gives its runtime every feature, and rebuild the shell`);
     known ??= Object.fromEntries(Object.entries(analysis.shellModules ?? {}).map(([id, h]) => [id, [...h]]));
     for (const [id, hashes] of Object.entries(analysis.zoneModules ?? {})) known[id] = [...new Set([...(known[id] ?? []), ...hashes])];
@@ -165,7 +177,7 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
       }
     }
     /* Its prerendered pages, where Next reads them, made to run in the shell's document. */
-    walk(path.join(dir, "server", "app"), (rel) => {
+    if (fs.existsSync(path.join(dir, "server", "app"))) walk(path.join(dir, "server", "app"), (rel) => {
       if (rel.startsWith("_") || !(PRERENDERED.test(rel) || rel.includes(".segments/"))) return;
       const target = path.join(server, "app", rel);
       fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -173,18 +185,45 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
       else fs.copyFileSync(path.join(dir, "server", "app", rel), target);
     });
 
+    /* Its Pages Router pages: in the pages manifest, pointing into its image (its _app, _document and _error too when
+       the app has none); its prerendered pages and their data where Next reads them, as built. */
+    const zonePages = readJson(path.join(dir, "server", "pages-manifest.json"), {});
+    const SYSTEM = new Set(["/_app", "/_document", "/_error", "/404", "/500"]);
+    const pageRoutes = Object.keys(zonePages).filter((p) => !SYSTEM.has(p));
+    for (const page of Object.keys(zonePages)) {
+      if (SYSTEM.has(page) && (!page.startsWith("/_") || pagesManifest[page])) continue;
+      pagesManifest[page] = path.posix.join("..", "zones", zone, "server", zonePages[page]);
+    }
+    if (pageRoutes.length) {
+      pagesZones.push({ zone, mount, buildId });
+      const segments = new Set(pageRoutes.map((r) => r.split("/")[1]));
+      walk(path.join(dir, "server", "pages"), (rel) => {
+        if (!segments.has(rel.split("/")[0].replace(/\..*$/, "")) || !/\.(html|json|meta)$/.test(rel)) return;
+        if (/-manifest\.json$/.test(rel)) return;
+        const target = path.join(server, "pages", rel);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(path.join(dir, "server", "pages", rel), target);
+      });
+    }
+
     /* Routing: its dynamic routes, its own rules, its aliases (as Zones serves them: rewrites before files). */
     const zoneRoutesManifest = readJson(path.join(dir, "routes-manifest.json"), {});
     const ownRule = (r) => !r.internal;
-    const zoneRoutePaths = new Set(pages.map((p) => zoneRoutes[p]));
+    const zoneRoutePaths = new Set([...pages.map((p) => zoneRoutes[p]), ...pageRoutes]);
+    /* A page's /_next/data route under the app's build id; a request under the zone's own is rewritten to it. */
+    routes.dataRoutes = [...(routes.dataRoutes ?? []), ...(zoneRoutesManifest.dataRoutes ?? []).filter((r) => pageRoutes.includes(r.page)).map((r) => {
+      const swap = (re) => re && re.replace(`/${escapeStringRegexp(buildId)}/`, `/${escapeStringRegexp(shellBuildId)}/`);
+      return { ...r, dataRouteRegex: swap(r.dataRouteRegex), ...(r.namedDataRouteRegex ? { namedDataRouteRegex: swap(r.namedDataRouteRegex) } : {}) };
+    })];
     routes.dynamicRoutes = [...(routes.dynamicRoutes ?? []), ...(zoneRoutesManifest.dynamicRoutes ?? []).filter((r) => zoneRoutePaths.has(r.page))];
     routes.staticRoutes = [...(routes.staticRoutes ?? []), ...(zoneRoutesManifest.staticRoutes ?? []).filter((r) => zoneRoutePaths.has(r.page))];
     routes.headers = [...(routes.headers ?? []), ...(zoneRoutesManifest.headers ?? []).filter(ownRule)];
     routes.redirects = [...(routes.redirects ?? []), ...(zoneRoutesManifest.redirects ?? []).filter(ownRule)];
     const asPhases = (r) => (Array.isArray(r) ? { beforeFiles: [], afterFiles: r, fallback: [] } : { beforeFiles: [], afterFiles: [], fallback: [], ...r });
     const shellRewrites = asPhases(routes.rewrites ?? []), zoneRewrites = asPhases(zoneRoutesManifest.rewrites ?? []);
+    const dataRewrite = pageRoutes.length && buildId !== shellBuildId ? [buildCustomRoute("rewrite", { source: `/_next/data/${buildId}/:path*`, destination: `/_next/data/${shellBuildId}/:path*` })] : [];
     routes.rewrites = {
-      beforeFiles: [...aliases.map((a) => buildCustomRoute("rewrite", { source: a.source, destination: a.destination })), ...shellRewrites.beforeFiles, ...zoneRewrites.beforeFiles.filter(ownRule)],
+      beforeFiles: [...dataRewrite, ...aliases.map((a) => buildCustomRoute("rewrite", { source: a.source, destination: a.destination })), ...shellRewrites.beforeFiles, ...zoneRewrites.beforeFiles.filter(ownRule)],
       afterFiles: [...shellRewrites.afterFiles, ...zoneRewrites.afterFiles.filter(ownRule)],
       fallback: [...shellRewrites.fallback, ...zoneRewrites.fallback.filter(ownRule)],
     };
@@ -201,7 +240,7 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
     const zoneFonts = readJson(path.join(dir, "server", "next-font-manifest.json"), {});
     fonts.app = { ...fonts.app, ...zoneFonts.app };
     fonts.appUsingSizeAdjust = fonts.appUsingSizeAdjust || Boolean(zoneFonts.appUsingSizeAdjust);
-    linked.push({ zone, pages: pages.length, remapped: Object.keys(analysis.idMap).length });
+    linked.push({ zone, pages: pages.length + pageRoutes.length, remapped: Object.keys(analysis.idMap).length });
   }
 
   /* Instrumentation, as Zones runs it: the shell's for every route, each zone's own for its routes, under the
@@ -235,6 +274,40 @@ async function onRequestError(error, request, context) {
 module.exports = { register, onRequestError };
 `);
   }
+
+  /* The zones' Pages Router pages render from their own builds: Next loads instrumentation.js before any route renders
+     (RouteModule.prepare), and it first makes the Pages route modules read a zone page's manifests (its build id, its
+     build manifest…) from the zone's image, as Zones does in memory (zones/hooks.cjs). */
+  if (pagesZones.length) {
+    fs.writeFileSync(path.join(server, "next-zones-pages.js"), `/* Written by next-zones: each zone's Pages Router pages render from their own build (.next/zones/<zone>). */
+const path = require("node:path");
+const zones = ${JSON.stringify(pagesZones.map(({ zone, mount }) => ({ zone, mount })))};
+const zoneOf = (page) => zones.find((z) => page === z.mount || page.startsWith(z.mount + "/"));
+for (const runtime of ["next/dist/compiled/next-server/pages-turbo.runtime.prod.js", "next/dist/compiled/next-server/pages-api-turbo.runtime.prod.js"]) {
+  let loaded;
+  try { loaded = require(runtime); } catch { continue; }
+  for (const exported of Object.values(loaded)) {
+    if (typeof exported !== "function") continue;
+    let proto = exported.prototype;
+    while (proto && !Object.prototype.hasOwnProperty.call(proto, "loadManifests")) proto = Object.getPrototypeOf(proto);
+    if (!proto || proto.__nextZonesPages) continue;
+    Object.defineProperty(proto, "__nextZonesPages", { value: true });
+    const loadManifests = proto.loadManifests;
+    proto.loadManifests = function (srcPage, ...rest) {
+      const zone = typeof srcPage === "string" ? zoneOf(srcPage) : null;
+      if (!zone) return loadManifests.call(this, srcPage, ...rest);
+      const own = this.distDir;
+      this.distDir = path.join(own, "zones", zone.zone);
+      try { return loadManifests.call(this, srcPage, ...rest); } finally { this.distDir = own; }
+    };
+  }
+}
+`);
+    const hook = path.join(server, "instrumentation.js");
+    const existing = fs.existsSync(hook) ? fs.readFileSync(hook, "utf8") : "module.exports = {};\n";
+    fs.writeFileSync(hook, `require(__dirname + "/next-zones-pages.js");\n${existing}`);
+  }
+  writeJson(path.join(server, "pages-manifest.json"), pagesManifest);
 
   /* Dynamic routes in Next's order. */
   const byPage = new Map((routes.dynamicRoutes ?? []).map((r) => [r.page, r]));

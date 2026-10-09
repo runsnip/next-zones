@@ -30,6 +30,8 @@ write("bad/app/other/page.tsx", page);
 write("bad/public/logo.svg", "<svg/>");
 write("bad/pages/legacy.tsx", page);
 write("bad/pages/_app.tsx", page);
+write("bad/pages/bad/old.tsx", page);
+write("bad/pages/api/hello.ts", "export default function handler() {}\n");
 /* For Next's and React's own checks: a hook called conditionally, and a type error. */
 write("bad/app/bad/counter.tsx", `"use client";
 import { useState } from "react";
@@ -64,7 +66,8 @@ const expected = {
   edge: /bad: app\/bad\/api\/route\.ts uses the edge runtime/,
   publicStray: /bad: public\/ has files outside public\/bad\/: logo\.svg/,
   shellSegment: /bad: \/shell-owned is the shell's too/,
-  pagesRouter: /bad: has Pages Router routes \(pages\/legacy\.tsx\)/,
+  pagesOutside: /bad: pages\/legacy\.tsx is outside its mount \/bad/,
+  pagesApi: /bad: pages\/api is outside its mount \/bad\n\s*→ pages\/api\/ is served at \/api\//,
   env: /! (bad|shell): env LABEL differs/,
   gitNext: /✗ git: not ignored by git: [^\n]*\.next/,
   gitDev: /✗ git: not ignored by git: [^\n]*\.zones-dev/,

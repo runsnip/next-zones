@@ -90,7 +90,16 @@ export async function prepareStandaloneZones({ shellDir, declaration, store, pin
   /* The shell's declaration, which Zones reads from next.config elsewhere. */
   fs.writeFileSync(path.join(dir, ".next", "zones-shell.json"), JSON.stringify(declaration, null, 2) + "\n");
   /* The images built and the pins: the folder is the whole deploy. */
-  if (store && fs.existsSync(store)) fs.cpSync(store, path.join(dir, ".zones-store"), { recursive: true, verbatimSymlinks: true });
+  if (store && fs.existsSync(store)) {
+    fs.cpSync(store, path.join(dir, ".zones-store"), { recursive: true, verbatimSymlinks: true });
+    /* The packages the images' server code leaves external, with what they import (bringZoneExternals). */
+    const images = [];
+    for (const zone of fs.readdirSync(path.join(dir, ".zones-store"), { withFileTypes: true })) {
+      if (!zone.isDirectory()) continue;
+      for (const version of fs.readdirSync(path.join(dir, ".zones-store", zone.name), { withFileTypes: true })) if (version.isDirectory()) images.push(path.join(dir, ".zones-store", zone.name, version.name));
+    }
+    await bringZoneExternals({ shellDir, root, homes: images });
+  }
   if (pins && fs.existsSync(pins)) fs.copyFileSync(pins, path.join(dir, "zones.json"));
   if (policy && fs.existsSync(policy)) fs.copyFileSync(policy, path.join(dir, "zones.config.json"));
   const entry = path.join(dir, "zones.js");
@@ -120,6 +129,64 @@ export async function traceInto({ shellDir, root, entries }) {
     copied++;
   }
   return copied;
+}
+
+/**
+ * A zone's server externals in a standalone folder. Turbopack's server code names a package it leaves external
+ * "<package>-<hash>" (a link in the build's node_modules) and loads it with its runtime's own require, which no tracer
+ * follows: the shell's trace never brings them. Each one a zone image's server code loads is traced into the standalone
+ * folder, and the image's link made to point at the copy there, so the folder holds everything and one copy of each
+ * package (react among them).
+ */
+export async function bringZoneExternals({ shellDir, root, homes }) {
+  const { createRequire } = await import("node:module");
+  const fromShell = createRequire(path.join(shellDir, "package.json"));
+  const HASHED = /["']((?:@[^/"']+\/)?[^/@"']+)-[0-9a-f]{16}((?:\/[^"']*)?)["']/g;
+  const entries = new Set(), names = new Set();
+  const scan = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const f = path.join(dir, e.name);
+      if (e.isDirectory()) { if (e.name !== "node_modules") scan(f); continue; }
+      if (!e.name.endsWith(".js")) continue;
+      for (const [, name, sub] of fs.readFileSync(f, "utf8").matchAll(HASHED)) {
+        names.add(name);
+        try { entries.add(fs.realpathSync(fromShell.resolve(`${name}${sub}`))); } catch {}
+      }
+    }
+  };
+  for (const home of homes) if (fs.existsSync(path.join(home, "server"))) scan(path.join(home, "server"));
+  if (entries.size) await traceInto({ shellDir, root, entries: [...entries] });
+  /* Each package's package.json, which a package need not export: Node reads its exports to resolve a subpath. */
+  for (const name of names) {
+    let dir = null;
+    for (const entry of entries) {
+      for (let d = path.dirname(entry); d !== path.dirname(d); d = path.dirname(d)) {
+        const file = path.join(d, "package.json");
+        if (fs.existsSync(file)) { try { if (JSON.parse(fs.readFileSync(file, "utf8")).name === name) dir = d; } catch {} break; }
+      }
+      if (dir) break;
+    }
+    const to = path.join(root, "node_modules", name, "package.json");
+    if (dir && !fs.existsSync(to)) { fs.mkdirSync(path.dirname(to), { recursive: true }); fs.copyFileSync(path.join(dir, "package.json"), to); }
+  }
+  /* The images' links, to the copies in the folder. */
+  for (const home of homes) {
+    const modules = path.join(home, "node_modules");
+    if (!fs.existsSync(modules)) continue;
+    const relink = (entry) => {
+      const named = /^((?:@[^/]+\/)?[^/@]+)-[0-9a-f]{16}$/.exec(entry)?.[1];
+      const target = named && path.join(root, "node_modules", named);
+      if (!target || !fs.existsSync(target)) return;
+      const at = path.join(modules, entry);
+      fs.rmSync(at, { recursive: true, force: true });
+      fs.symlinkSync(path.relative(path.dirname(at), target), at);
+    };
+    for (const entry of fs.readdirSync(modules)) {
+      if (entry.startsWith("@")) for (const inner of fs.readdirSync(path.join(modules, entry))) relink(`${entry}/${inner}`);
+      else relink(entry);
+    }
+  }
+  return [...names];
 }
 
 /** What Zones' server needs: its own code and the modules of Next it uses (next-contract.cjs MODULES, requireNext calls). */

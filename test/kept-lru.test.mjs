@@ -43,4 +43,8 @@ test("a cache key's zone segment, in the key formats of Next 16.3.6 and 16.3.8",
   assert.equal(keyPath("/route-cache/APP_ROUTE/0f3a9c/$/shop/api/x"), "/shop/api/x");
   assert.equal(segmentOf("/route-cache/APP_PAGE/0f3a9c/$/index"), "index");
   assert.equal(segmentOf("e342b73f63beb329cde5eda486f92f6d"), "");
+  /* A Pages Router page's data, as the router keys it: under its page's segment, whatever the build id. */
+  assert.equal(segmentOf("/_next/data/UuyR_JjWRnWeGD5gj4kA5/docs/a.json"), "docs");
+  assert.equal(segmentOf("/_next/data/UuyR_JjWRnWeGD5gj4kA5/docs.json"), "docs");
+  assert.equal(segmentOf("/_next/static/chunks/x.js"), "_next");
 });

@@ -104,7 +104,13 @@ Zones' work is on the server:
 
 | Area | Status | How |
 |---|---|---|
-| A zone with `pages/` | 🔧 refused ✅ `pages.mjs` | Not supported yet; next-zones is App Router only, and a zone with Pages Router routes (its `pages-manifest`, Next's own `/404` and `/500` aside) is refused at install, naming them. The Pages Router client keeps the build's page list (`_buildManifest.js`, `sortedPages`) and hard-navigates to any page it does not know. A zone's pages would need a merged `_buildManifest.js` served by Zones, plus `PAGES` matchers and a merged `pages-manifest` |
+| A zone's pages under its mount: static, `getStaticProps` (prerendered, a blocking `fallback`, `revalidate`), `getServerSideProps` | ✅ `pagesrouter.mjs` | Each page renders whole in its zone's build (its document, `_app`, build id, chunks): Next never shares a document between the two routers. The zone's pages are merged into the server's pages manifest and the router's pages, data routes and dynamic routes (activate.cjs); a Pages route module reads its build id and build manifest from the zone's build (hooks.cjs, through the route module's `loadManifests`); a request under the zone's build id (`/_next/data/<id>/…`) is read as the shell's (server.cjs) |
+| Soft navigation inside a Pages Router zone, `_app` state kept; to another zone, a new document | ✅ `pagesrouter.mjs` | Next's Pages Router client, on the zone's own build |
+| A live install of a Pages Router zone, a rollback, open tabs | ✅ `pagesrouter.mjs` | `<ZoneUpdates />` in the zone's `_app`: after a swap the next navigation loads a new document. The static files of every image in the store stay served (assets.cjs) |
+| A route handler under the mount in a Pages Router zone (`app/<mount>/…/route.ts`) | ✅ `pagesrouter.mjs` | |
+| `pages/api/` in a zone | ⛔ refused ✅ `doctor.mjs` | Served at `/api/…`, outside the mount |
+| Pages Router zones in `next-zones dev`, several with their own `_app` and `_document` | ✅ `composedpages.mjs` | Pages re-exported into the composed app (Turbopack's dev server does not follow a linked page); a composed `_app` and `_document` pick each page's own zone's by mount |
+| Pages Router zones in `mode: "single"`, and with `output: "standalone"` | ✅ `singlepages.mjs`, `singlepagesstandalone.mjs`, `zonesstandalone.mjs` | Linked like App Router pages; the app's `instrumentation.js` makes a zone page's route module read its own build's manifests. Standalone: the packages a zone's server code loads as externals are traced into the folder (standalone.mjs `bringZoneExternals`) |
 
 ## Process and build
 
