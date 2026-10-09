@@ -6,8 +6,7 @@
  *     mount: "/blog",
  *     aliases: [{ source: "/post/:id", destination: "/blog/:id" }],
  *     livePull: true,                               // a ping to Zones may make it pull this zone's images (off by default)
- *   }, {
- *     // the zone's own Next config
+ *     // …and the zone's own Next config, in the same object
  *   });
  *
  * zoneConfig returns the zone's Next config as it is, with the zone's declaration attached under a symbol, which Next
@@ -51,8 +50,13 @@ export function checkZone(zone, where = "zone") {
     if (mount !== "/") throw new Error(`${where}: mode is the shell's to declare (mount "/"), not a zone's`);
     if (!MODES.includes(zone.mode)) throw new Error(`${where}: mode must be ${MODES.map((m) => JSON.stringify(m)).join(" or ")}, got ${JSON.stringify(zone.mode)}`);
   }
+  /* The metrics store (metrics.cjs) and <base>/metrics: one for the whole Zones process, so the shell's to declare. */
+  if (zone.metrics !== undefined) {
+    if (mount !== "/") throw new Error(`${where}: metrics is the shell's to declare (mount "/"), not a zone's: a zone's code writes to the shell's store`);
+    if (typeof zone.metrics !== "boolean") throw new Error(`${where}: metrics must be true or false, got ${JSON.stringify(zone.metrics)}`);
+  }
   if (zone.output !== undefined) throw new Error(`${where}: output is Next's option, in the zone's Next config (the second argument), not in its zone declaration; the way the workspace is served is mode`);
-  return { mount, aliases, ...(zone.livePull ? { livePull: true } : {}), ...(endpoints ? { endpoints } : {}), ...(zone.mode && zone.mode !== "zones" ? { mode: zone.mode } : {}) };
+  return { mount, aliases, ...(zone.livePull ? { livePull: true } : {}), ...(endpoints ? { endpoints } : {}), ...(zone.mode && zone.mode !== "zones" ? { mode: zone.mode } : {}), ...(zone.metrics ? { metrics: true } : {}) };
 }
 
 export const DEFAULT_ENDPOINTS_BASE = "/_next-zones";
@@ -104,8 +108,21 @@ function withAliases(config, { aliases }) {
    alone, next-zones dev's composed app) the zone's Next config is passed through untouched. */
 export const BUILD_OPTIONS = buildOptions.BUILD_OPTIONS;
 
-/** Wraps a zone's Next config (an object or a function of the phase) with its zone declaration. */
-export function zoneConfig(zone, nextConfig = {}) {
+/* What zoneConfig reads as the zone's declaration; every other key of its options is Next's. */
+const ZONE_KEYS = ["mount", "aliases", "livePull", "endpoints", "mode", "metrics"];
+
+/**
+ * A zone's Next config with its zone declaration: zoneConfig({ mount: "/blog", ...nextConfig }), one object, the
+ * declaration's keys (ZONE_KEYS) taken out and the rest passed to Next. A Next config that is a function of the phase
+ * comes second: zoneConfig({ mount: "/blog" }, (phase) => …), so the declaration is known without calling it. The
+ * form zoneConfig(declaration, nextConfigObject) is still read.
+ */
+export function zoneConfig(options, second) {
+  let zone = options, nextConfig = second ?? {};
+  if (second === undefined && options && typeof options === "object") {
+    zone = {}; nextConfig = {};
+    for (const [key, value] of Object.entries(options)) (ZONE_KEYS.includes(key) ? zone : nextConfig)[key] = value;
+  }
   const declared = checkZone(zone);
   const apply = (config) => {
     /* NEXT_ZONES_BUILD: "dev" in next-zones dev's composed app (one next dev, no build options needed), anything else

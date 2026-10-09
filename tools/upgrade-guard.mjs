@@ -31,14 +31,14 @@ const skip = /[\\/](node_modules|\.next|\.zones-store[^\\/]*|\.zones-cache|[^\\/
 fs.cpSync(spike, work, { recursive: true, filter: (src) => !skip.test(src) });
 
 /* The spike's Zones requires the package's src by a relative path: point it at this repository's. */
-/* The checks reach the package by "../../" (src/, tools/): in the copy, that is the package's absolute path. */
+/* The checks reach the package by "../../" (src/, tools/, package.json): in the copy, that is the package's absolute path. */
 for (const file of fs.readdirSync(work).filter((f) => /\.(mjs|cjs|sh)$/.test(f))) {
   const text = fs.readFileSync(path.join(work, file), "utf8");
-  const fixed = text.replaceAll("../../src/", `${root}/src/`).replaceAll("../../tools/", `${root}/tools/`);
+  const fixed = text.replaceAll("../../src/", `${root}/src/`).replaceAll("../../tools/", `${root}/tools/`).replaceAll("../../package.json", `${root}/package.json`);
   if (fixed !== text) fs.writeFileSync(path.join(work, file), fixed);
   /* Any other way back to the package would reach nothing from the copy: refuse before building, not after. */
   const left = fixed.split("\n").map((line, i) => [i + 1, line]).filter(([, line]) => /\.\.\/\.\.\/|"\.\.",\s*"\.\."/.test(line));
-  if (left.length) { console.error(`${file}: reaches the package by a path the guard does not rewrite (use "../../src/" or "../../tools/"):\n${left.map(([n, l]) => `  ${n}: ${l.trim()}`).join("\n")}`); fs.rmSync(work, { recursive: true, force: true }); process.exit(1); }
+  if (left.length) { console.error(`${file}: reaches the package by a path the guard does not rewrite (use "../../src/", "../../tools/" or "../../package.json"):\n${left.map(([n, l]) => `  ${n}: ${l.trim()}`).join("\n")}`); fs.rmSync(work, { recursive: true, force: true }); process.exit(1); }
 }
 const pkgFile = path.join(work, "package.json");
 const pkg = JSON.parse(fs.readFileSync(pkgFile, "utf8"));

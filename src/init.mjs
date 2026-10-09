@@ -67,7 +67,8 @@ function writeZone(root, name, mount, pm) {
   write(root, `${name}/tsconfig.json`, tsconfig());
   write(root, `${name}/next.config.mjs`, `import { zoneConfig } from "@runsnip/next-zones/config";
 
-export default zoneConfig({ mount: "${mount}" }, {
+export default zoneConfig({
+  mount: "${mount}",
   transpilePackages: ["shared"],
 });
 `);
@@ -161,7 +162,9 @@ export function RootLayout({ children }: { children: ReactNode }) {
 /* The shell: the zone mounted at "/". It declares the URLs Zones serves of its own, under /_next-zones: the swap
    events <ZoneUpdates /> listens to, health for a supervisor, and the admin endpoints (behind NEXT_ZONES_ADMIN_TOKEN)
    that install zone images. Remove what you do not use. */
-export default zoneConfig({ mount: "/", endpoints: { events: true, health: true, admin: true } }, {
+export default zoneConfig({
+  mount: "/",
+  endpoints: { events: true, health: true, admin: true },
   transpilePackages: ["shared"],
 });
 `);

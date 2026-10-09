@@ -133,3 +133,19 @@ test("the pinned root holds a node_modules linked from elsewhere", () => {
     assert.equal(projectRoot(outside), top);
   } finally { fs.rmSync(top, { recursive: true, force: true }); }
 });
+
+test("zoneConfig takes one object: the declaration's keys out, the rest Next's", () => {
+  const merged = zoneConfig({ mount: "/blog", aliases: [{ source: "/p/:slug", destination: "/blog/p/:slug" }], livePull: true, reactStrictMode: true, output: "standalone", experimental: { other: 1 } });
+  const apart = zoneConfig({ mount: "/blog", aliases: [{ source: "/p/:slug", destination: "/blog/p/:slug" }], livePull: true }, { reactStrictMode: true, output: "standalone", experimental: { other: 1 } });
+  const zone = (c) => c[Symbol.for("@runsnip/next-zones/zones")];
+  assert.deepEqual(zone(merged), zone(apart));
+  assert.equal(merged.reactStrictMode, true);
+  assert.equal(merged.output, "standalone");
+  assert.equal(merged.mount, undefined);
+  assert.equal(merged.livePull, undefined);
+  assert.deepEqual(merged.experimental, { other: 1 });
+  /* A function config still comes second. */
+  const fn = zoneConfig({ mount: "/blog" }, () => ({ reactStrictMode: true }));
+  assert.equal(typeof fn, "function");
+  assert.deepEqual(zone(fn), { mount: "/blog", aliases: [] });
+});

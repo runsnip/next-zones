@@ -5,6 +5,7 @@
  *
  *   events  GET  <base>/events                         swap events for <ZoneUpdates />, public
  *   health  GET  <base>/health                         200 once Zones serves; details for an admin
+ *   metrics GET  <base>/metrics                        Prometheus text, to an admin, with zoneConfig({ metrics: true })
  *   admin   GET  <base>/images                          the zone images in the store, by zone, with the active version
  *           GET  <base>/images/<zone>/<version>         one zone image: built with, live pull, integrity
  *           POST <base>/images/<zone>/<version>/pull    Zones pulls it from its sources (a ping: the zone must allow live pulls)
@@ -129,6 +130,15 @@ function createEndpoints(ctx, { installer, collector, bench, debugInfo }) {
   /** Answers a request for one of the declared endpoints; returns false when the request is not for them. */
   async function handle(req, res, url) {
     const declared = ctx.endpoints;
+    /* The metrics store as Prometheus text, to an admin (metrics.cjs), when the shell turned metrics on: under the
+       declared base, or the default one when no endpoint group is declared. */
+    if (ctx.metrics && url.pathname === `${declared?.base ?? "/_next-zones"}/metrics` && req.method === "GET") {
+      if (!authorized(req)) { json(res, 401, { error: "next-zones: these endpoints need the admin token" }); return true; }
+      const { render, CONTENT_TYPE } = require("../metrics.cjs");
+      res.writeHead(200, { "content-type": CONTENT_TYPE, "cache-control": "no-store" });
+      res.end(render());
+      return true;
+    }
     if (!declared) return false;
     const { base } = declared;
     if (url.pathname !== base && !url.pathname.startsWith(`${base}/`)) return false;

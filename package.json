@@ -52,6 +52,10 @@
       "default": "./src/build.mjs"
     },
     "./tsconfig/zone.json": "./tsconfig/zone.json",
+    "./metrics": {
+      "types": "./src/metrics.d.cts",
+      "default": "./src/metrics.cjs"
+    },
     "./sources": {
       "types": "./src/sources.d.cts",
       "default": "./src/sources.cjs"

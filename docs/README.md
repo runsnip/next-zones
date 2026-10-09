@@ -11,7 +11,8 @@ server without a restart.
 >     `watch`;
 >   - Zones (`createZones`), which installs and swaps zones at run time;
 >   - one combined build of every zone (`mode: "single"`, the composer);
->   - `<ZoneUpdates />`.
+>   - `<ZoneUpdates />`;
+>   - metrics: Zones' own and any zone's, as Prometheus text (`@runsnip/next-zones/metrics`).
 
 ## Why
 
@@ -40,7 +41,8 @@ next-zones keeps the separation (each zone builds, versions and deploys on its o
 8. [Assets: fonts, images, public files](assets.md)
 9. [Live updates and requirements](updates.md)
 10. [Zones: live installs](zones.md)
-11. [What is supported](support.md)
+11. [Metrics](metrics.md)
+12. [What is supported](support.md)
 
 ## License
 

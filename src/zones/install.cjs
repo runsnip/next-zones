@@ -10,6 +10,7 @@ const { monitorEventLoopDelay } = require("node:perf_hooks");
 const { ZoneError } = require("./context.cjs");
 const { prune: pruneStore } = require("./prune.cjs");
 const { pullImage, admit, incoming: incomingDir } = require("./pull.cjs");
+const metrics = require("../metrics.cjs");
 
 const now = () => performance.now();
 
@@ -17,6 +18,9 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
   /* One switch at a time: a plan is always prepared from the state its switch replaces (activate re-prepares a stale
      plan only once, which a concurrent switch could outrun). */
   let switchQueue = Promise.resolve();
+  const blocked = metrics.histogram("nextzones_install_blocked_seconds", { help: "Longest the event loop was held during an install, by zone", buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1] });
+  const pruned = metrics.counter("nextzones_pruned_images_total", { help: "Zone images pruned from the store" });
+  const prunedBytes = metrics.counter("nextzones_pruned_bytes_total", { help: "Bytes freed by pruning" });
   function exclusive(task) {
     const run = switchQueue.then(task);
     switchQueue = run.catch(() => {});
@@ -29,8 +33,12 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
     for (const res of ctx.listeners) res.write(message);
   }
 
-  /** Installs the zone build in `dist`; resolves with the timings, once it serves. */
-  async function install(name, dist) {
+  /** Installs the zone build in `dist`; resolves with the timings, once it serves. Measured (metrics.cjs). */
+  function install(name, dist) {
+    return metrics.time("nextzones_install_seconds", () => installOnce(name, dist), { zone: name }, { help: "Installs, staging to serving, by zone and outcome" })
+      .then((r) => { blocked.observe(r.blockedMs / 1000, { zone: name }); return r; });
+  }
+  async function installOnce(name, dist) {
     const t = { stage: 0, prepare: 0, overlay: 0, reloadMatchers: 0, fsCheck: 0, lru: 0, activate: 0 };
     let s0 = now();
     const loop = monitorEventLoopDelay({ resolution: 1 });
@@ -125,7 +133,10 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
   }
   const incoming = (name, version) => incomingDir(ctx.store, name, version);
 
-  async function pullOnce(name, version, via) {
+  function pullOnce(name, version, via) {
+    return metrics.time("nextzones_pull_seconds", () => pullImageOnce(name, version, via), { zone: name, via }, { help: "Pulls of a zone image from a source, by zone, what asked and outcome", buckets: [0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300] });
+  }
+  async function pullImageOnce(name, version, via) {
     const { source, identity } = await pullImage({
       store: ctx.store, name, version, sources: ctx.options.sources ?? [], live: via === "ping",
       minFree: ctx.options.minFree, statfs: ctx.options.statfs, verify: staging.verifyImage,
@@ -158,6 +169,7 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
       holds: (key) => collector.holds(key),
     }));
     pruning = run.catch(() => {});
+    if (!dryRun) run.then((r) => { pruned.inc(r.removed.length); prunedBytes.inc(r.freedBytes ?? 0); }, () => {});
     return run;
   }
   const mb = (n) => `${(n / 1048576).toFixed(0)} MB`;

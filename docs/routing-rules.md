@@ -4,7 +4,8 @@ A zone keeps its own `headers()`, `redirects()` and `rewrites()` in its `next.co
 when the zone runs alone and when it is served together with other zones.
 
 ```js
-export default zoneConfig({ mount: "/blog" }, {
+export default zoneConfig({
+  mount: "/blog",
   async headers() {
     return [{ source: "/blog/api/:path*", headers: [{ key: "x-zone", value: "blog" }] }];
   },

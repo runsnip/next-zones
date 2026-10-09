@@ -45,7 +45,8 @@ Each zone's `next.config.mjs` (or `.ts`):
 // shell/next.config.mjs
 import { zoneConfig } from "@runsnip/next-zones/config";
 
-export default zoneConfig({ mount: "/" }, {
+export default zoneConfig({
+  mount: "/",
   transpilePackages: ["shared"],
 });
 ```
@@ -54,7 +55,8 @@ export default zoneConfig({ mount: "/" }, {
 // blog/next.config.mjs
 import { zoneConfig } from "@runsnip/next-zones/config";
 
-export default zoneConfig({ mount: "/blog" }, {
+export default zoneConfig({
+  mount: "/blog",
   transpilePackages: ["shared"],
 });
 ```

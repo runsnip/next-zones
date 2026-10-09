@@ -3,8 +3,13 @@
 ```ts
 import { zoneConfig } from "@runsnip/next-zones/config";
 
-export default zoneConfig(zone, nextConfig?);
+export default zoneConfig({ ...zone, ...nextConfig });     // one object
+export default zoneConfig(zone, (phase) => nextConfig);  // a Next config that is a function of the phase
 ```
+
+One object holds both: `zoneConfig` takes out the zone's keys below and passes every other key to Next. A Next config
+that is a function of the phase comes second, after the zone's keys, so the declaration is known without calling it.
+`zoneConfig(zone, nextConfigObject)` is read too.
 
 ## `zone`
 
@@ -13,7 +18,8 @@ export default zoneConfig(zone, nextConfig?);
 | `mount` | `string` | yes | `"/"` for the shell, otherwise one URL segment such as `"/blog"` (lowercase letters, digits, `-`) |
 | `aliases` | `{ source: string; destination: string }[]` | no | URLs at the root that this zone serves. See [aliases](aliases.md) |
 | `endpoints` | `{ base?, events?, health?, admin? }` | no (the shell only) | The URLs Zones serves of its own, under `base` (`"/_next-zones"` by default); none unless declared. See [endpoints](zones.md#endpoints) |
-| `mode` | `"zones"` \| `"single"` | no (the shell only), `"zones"` | How the workspace is served: `"zones"`, the shell as an app and every other zone as an [image](zones.md#zone-images) Zones installs while it runs; `"single"`, every zone in one Next app run by `next start`. See [build and start](cli.md#build-and-start). Next's own options, `output` included, go in the Next config (the second argument) |
+| `mode` | `"zones"` \| `"single"` | no (the shell only), `"zones"` | How the workspace is served: `"zones"`, the shell as an app and every other zone as an [image](zones.md#zone-images) Zones installs while it runs; `"single"`, every zone in one Next app run by `next start`. See [build and start](cli.md#build-and-start). Next's own options, `output` included, are Next's keys of the same object |
+| `metrics` | `boolean` | no (the shell only), `false` | Opens one metrics store for the whole Zones process: requests by zone and version, installs, pulls, memory, and what a zone's code writes with `@runsnip/next-zones/metrics`; served as Prometheus text at `<base>/metrics` to an admin. Off, the metrics functions do nothing. See [metrics](metrics.md) |
 | `livePull` | `boolean` | no, `false` | Whether a ping (an admin request to Zones' `<base>/images/<zone>/<version>/pull` or `/install`) may make Zones pull this zone's images from its sources. Recorded in each zone image's `zone.json`; read from the zone's latest image before anything is fetched. Without it, the zone's images are pulled on the server side only (`next-zones pull`, a deploy step). Images already in the store install either way. See [live pulls](zones.md#live-pulls) |
 
 An invalid declaration throws as soon as `next.config` is loaded, for example: `mount must be "/" (the shell) or one
@@ -22,8 +28,8 @@ URL segment like "/blog"`.
 ## `nextConfig`
 
 The zone's own Next config:
-- an object;
-- or a function of the phase, `(phase, { defaultConfig }) => config`, which may be async.
+- every key of the object that is not the zone's;
+- or a function of the phase, `(phase, { defaultConfig }) => config`, which may be async, as the second argument.
 
 `zoneConfig` returns it with the build options below, the zone declaration (attached under a symbol that Next
 ignores and next-zones reads back), and, when the zone runs alone, its aliases as rewrites. Everything else in your
@@ -78,13 +84,12 @@ Links to the other apps are then links to another site: point them at where thos
 ```js
 import { zoneConfig } from "@runsnip/next-zones/config";
 
-export default zoneConfig(
-  { mount: "/blog", aliases: [{ source: "/post/:id", destination: "/blog/:id" }] },
-  {
-    transpilePackages: ["shared"],
-    images: { remotePatterns: [{ hostname: "images.example.com" }] },
-  },
-);
+export default zoneConfig({
+  mount: "/blog",
+  aliases: [{ source: "/post/:id", destination: "/blog/:id" }],
+  transpilePackages: ["shared"],
+  images: { remotePatterns: [{ hostname: "images.example.com" }] },
+});
 ```
 
 ## `readZone(dir)`

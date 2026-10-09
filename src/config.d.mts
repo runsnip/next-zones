@@ -20,6 +20,12 @@ export interface Zone {
    * included, go in the Next config and are honoured in both.
    */
   mode?: "zones" | "single";
+  /**
+   * The shell only: opens the metrics store for the whole Zones process (requests, installs, memory; and what a zone's
+   * code writes with `@runsnip/next-zones/metrics`), served as Prometheus text at <base>/metrics to an admin. Off by
+   * default; off, the metrics functions do nothing.
+   */
+  metrics?: boolean;
 }
 
 /** The URLs a Zones service serves of its own, under one base path; each group off unless set. */
@@ -38,9 +44,15 @@ export declare const DEFAULT_ENDPOINTS_BASE: "/_next-zones";
 
 type ConfigFunction = (phase: string, context: { defaultConfig: NextConfig }) => NextConfig | Promise<NextConfig>;
 
-/** Wraps a zone's Next config with its zone declaration and what next-zones needs. */
-export declare function zoneConfig(zone: Zone, nextConfig?: NextConfig): NextConfig;
+/**
+ * A zone's Next config with its zone declaration, in one object: zoneConfig({ mount: "/blog", ...nextConfig }). The
+ * declaration's keys are taken out; every other key is Next's.
+ */
+export declare function zoneConfig(options: Zone & NextConfig): NextConfig;
+/** A Next config that is a function of the phase comes second, so the declaration is known without calling it. */
 export declare function zoneConfig(zone: Zone, nextConfig: ConfigFunction): ConfigFunction;
+/** Read too: the declaration and an object Next config apart. */
+export declare function zoneConfig(zone: Zone, nextConfig: NextConfig): NextConfig;
 /** Checks a zone declaration and returns it normalised; throws on an invalid one. */
 export declare function checkZone(zone: Zone, where?: string): Required<Zone>;
 /** The zone declaration of the app in `dir`, or null when its next.config does not use zoneConfig. */

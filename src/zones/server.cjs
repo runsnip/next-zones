@@ -77,6 +77,7 @@ function createServer(ctx, { assets, installer, bench, collector }) {
   async function handleScoped(req, res) {
     ctx.reclaim?.track(req, res);
     const url = new URL(req.url, "http://x");
+    ctx.metrics?.track(req, res, url.pathname);
     if (await endpoints.handle(req, res, url)) return;
     const asset = assets.zoneAsset(url.pathname);
     if (asset && (req.method === "GET" || req.method === "HEAD")) {
@@ -97,6 +98,8 @@ function createServer(ctx, { assets, installer, bench, collector }) {
     const recorded = path.join(ctx.shell, ".next", "zones-shell.json");
     const shell = fs.existsSync(recorded) ? JSON.parse(fs.readFileSync(recorded, "utf8")) : await readZone(ctx.shell);
     if (shell?.mount !== "/") throw new Error(`next-zones: the shell (${ctx.shell}) must use zoneConfig({ mount: "/" }), got ${JSON.stringify(shell)}`);
+    /* The metrics store: the shell's declaration, or createZones({ metrics }) over it. */
+    if (ctx.options.metrics ?? shell.metrics) ctx.metrics = require("./zone-metrics.cjs").installZoneMetrics(ctx);
     /* The URLs Zones serves of its own: createZones({ endpoints }) over the shell's declaration; none unless declared. */
     ctx.endpoints = ctx.options.endpoints !== undefined ? normalizeEndpoints(ctx.options.endpoints, "createZones") : (shell.endpoints ?? null);
     if (ctx.endpoints) {

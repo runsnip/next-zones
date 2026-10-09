@@ -12,9 +12,11 @@ import os from "node:os";
 import path from "node:path";
 
 const CHECKS = ["browse", "features", "bound", "swap", "links", "alias", "media", "routing", "rules", "routes", "proxy",
-  "revalidate", "instrumentation", "shared", "concurrent", "swapload", "signal", "external", "params", "miss", "many", "cc", "sharedver", "context", "standalone", "composed", "doctor", "init", "contract", "collect", "integrity", "health", "pull", "endpoints", "endpointsoff", "endpointsbase", "localdeps", "prune", "release", "single", "singlestandalone", "singleexport", "zonesstandalone", "zonesexport", "ownhandler", "reclaim", "lrumem", "isrswap", "widths"];
+  "revalidate", "instrumentation", "shared", "concurrent", "swapload", "signal", "external", "params", "miss", "many", "cc", "sharedver", "context", "standalone", "composed", "doctor", "init", "contract", "collect", "integrity", "health", "pull", "endpoints", "endpointsoff", "endpointsbase", "localdeps", "prune", "release", "single", "singlestandalone", "singleexport", "zonesstandalone", "zonesexport", "ownhandler", "reclaim", "lrumem", "isrswap", "widths", "leak", "metrics"];
 /* Checks that need their own setup: the environment for Zones and the check. */
 const SETUP = {
+  /* A non-public env variable only the server may read (leak.mjs looks for it in everything a browser can fetch). */
+  leak: () => ({ NZ_LEAK_SECRET: "nz-env-marker-a8e0" }),
   /* The zone store copied away from the workspace, as on a server. */
   external: () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nz-store-"));
@@ -74,6 +76,8 @@ const chosen = process.argv.slice(2).length ? process.argv.slice(2) : CHECKS;
    is brought up to date with src/ first: the zones' next.config and the shell import it. */
 /* Written "../../src/" so the upgrade guard, which runs a copy of this folder, can point it at the package. */
 fs.cpSync("../../src/", path.join("node_modules", "@runsnip", "next-zones", "src"), { recursive: true });
+/* Its exports map too (a new subpath, such as ./metrics, is resolved from it). */
+fs.copyFileSync("../../package.json", path.join("node_modules", "@runsnip", "next-zones", "package.json"));
 const BASE = "http://127.0.0.1:3900";
 
 async function startZones(env) {
