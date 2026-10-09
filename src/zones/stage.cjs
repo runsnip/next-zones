@@ -166,7 +166,7 @@ function createStaging(ctx) {
     await fs.promises.rename(temp, file);
   }
 
-  const ANALYSIS = "m11";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
+  const ANALYSIS = "m13";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
   async function analyseZoneClient(staged) {
     const fingerprint = crypto.createHash("sha1").update(JSON.stringify([ANALYSIS, ctx.clientKnown ? [...ctx.clientKnown].map(([id, h]) => [id, [...h].sort()]).sort() : "shell"])).digest("hex").slice(0, 12);
     const base = path.join(ctx.cacheDir, staged.name, `${staged.buildKey}--${fingerprint}`);

@@ -31,7 +31,7 @@ const { useParser, readModule, remapRequires, holdsState } = require("./module-c
 useParser(createRequire(path.join(shellDist, "..", "package.json"))("next/dist/compiled/acorn"));
 const sha = (text) => crypto.createHash("sha1").update(text).digest("base64");
 /* The analysis format, part of the cache key: hashes of another format are not comparable. */
-const FORMAT = "m3";
+const FORMAT = "m4";
 /* What a group's factory is (module-code.cjs): its canonical code's hash, the ids it requires (where), the runtime
    methods it calls. Kept on disk by the factory's text (readCache), so a module two builds share, byte for byte (most
    of a zone's next version), is parsed once: parsing is most of the analysis's time. */
@@ -40,12 +40,13 @@ let cached = {};
 try { if (readCache) cached = JSON.parse(fs.readFileSync(readCache, "utf8")); } catch {}
 const read = (g) => {
   if (g.read) return g.read;
-  const key = sha(g.source);
+  /* A factory made in a strict scope is strict without its directive: part of what it is (module-code.cjs). */
+  const key = sha(`${g.strict ? "s" : ""}:${g.source}`);
   let r = reads.get(key);
   if (!r && cached[key]) r = { code: cached[key].c, requires: cached[key].r, runtimeMethods: new Set(cached[key].m) };
   if (!r) {
     let m;
-    try { m = readModule(g.source); }
+    try { m = readModule(g.source, { strict: Boolean(g.strict) }); }
     catch (error) { throw new Error(`next-zones: a client module (${g.ids.join(", ")}) could not be parsed: ${error.message}`); }
     r = { code: sha(m.canonical), requires: m.requires, runtimeMethods: m.runtimeMethods };
   }
@@ -131,8 +132,11 @@ function chunkGroups(file) {
   const pushed = [];
   const sandbox = { TURBOPACK: { push: (items) => pushed.push(items) }, document: undefined };
   sandbox.globalThis = sandbox.self = sandbox;
-  try { vm.runInNewContext(fs.readFileSync(file, "utf8"), sandbox, { filename: file, timeout: 5000 }); }
+  const text = fs.readFileSync(file, "utf8");
+  try { vm.runInNewContext(text, sandbox, { filename: file, timeout: 5000 }); }
   catch { if (!pushed.length) return []; }
+  /* A chunk of strict factories only is one "use strict" scope around a flat push (Next 16.4), or strict as a file. */
+  const fileStrict = /^\s*(?:"use strict"|\(\s*(?:\(\)\s*=>|function\s*\(\)\s*)\{\s*"use strict")/.test(text);
   const groups = [];
   const collect = (items, strict) => {
     let ids = [];
@@ -141,7 +145,7 @@ function chunkGroups(file) {
       else if (typeof item === "function") { groups.push({ ids, source: item.toString(), strict }); ids = []; } else ids.push(item);
     }
   };
-  for (const items of pushed) collect(items.slice(1), false);
+  for (const items of pushed) collect(items.slice(1), fileStrict);
   return groups;
 }
 const chunksOf = (root) => fs.readdirSync(path.join(root, "static", "chunks")).filter((f) => f.endsWith(".js") && !isRuntime(f));

@@ -38,21 +38,75 @@ function installModuleRegistry(ctx) {
   const BORROWED = Symbol("next-zones borrowed ids");
   const FACTORIES = Symbol("next-zones factories");
 
-  function keyOf(factories, id) {
-    const factory = factories.get(id) ?? factories.get(Number(id));
-    if (!factory) return null;
-    let key = factoryKeys.get(factory);
-    if (!key) {
-      /* Turbopack cuts a build's ids to as many digits as its module count needs, so one module has a longer id in a
-         bigger build (912598, 12598; an id's leading zeros are dropped): the key keeps the module's id and every long
-         number in its code (the ids it requires among them) modulo 10^ID_DIGITS, so the same module keys alike in
-         builds of either width. */
-      const low = (n) => String(Number(n) % 10 ** ID_DIGITS);
-      const code = factory.toString().replace(/\b\d{5,}\b/g, low);
-      key = `${typeof id === "number" || /^\d+$/.test(id) ? low(String(id)) : id}:${crypto.createHash("sha1").update(code).digest("base64")}`;
-      factoryKeys.set(factory, key);
+  /* A module's key is what it is, its dependencies included (a Merkle hash), not only its own code: a module's code names
+     what it requires by id, and two builds can give one id to different modules (a zone's own module in two versions
+     built from one path, a shared module over another version of what it imports). Sharing on the code alone handed
+     a build another build's dependencies. As on the client (zone-client.cjs): its own code's hash, then the keys of
+     what it requires, in order; a cycle is one component, keyed by its members. Turbopack cuts a build's ids to as
+     many digits as its module count needs, so one module has a longer id in a bigger build (912598, 12598; leading
+     zeros dropped): ids and long numbers are taken modulo 10^ID_DIGITS. */
+  const low = (n) => String(Number(n) % 10 ** ID_DIGITS);
+  const sha = (text) => crypto.createHash("sha1").update(text).digest("base64");
+  const own = new WeakMap();                           // factory → { hash, deps: the ids it requires that this runtime has }
+  function ownOf(factories, factory) {
+    let o = own.get(factory);
+    if (!o) {
+      const text = factory.toString();
+      const deps = [];
+      for (const m of text.matchAll(/\b\d{3,}\b/g)) if (factories.has(m[0]) || factories.has(Number(m[0]))) deps.push(m[0]);
+      /* A factory written in a strict scope (Next 16.4's nested strict array) has no directive of its own: the same
+         module either way. */
+      const body = text.replace(/^((?:\([^)]*\)|[\w$]+)\s*=>\s*\{)\s*"use strict";?/, "$1");
+      o = { hash: sha(body.replace(/\b\d{5,}\b/g, low)), deps };
+      own.set(factory, o);
     }
-    return key;
+    return o;
+  }
+  const factoryOf = (factories, id) => factories.get(id) ?? factories.get(Number(id));
+  function keyOf(factories, id) {
+    const factory = factoryOf(factories, id);
+    if (!factory) return null;
+    const known = factoryKeys.get(factory);
+    if (known) return known;
+    /* Tarjan's components over what is not keyed yet, iteratively; each finished after what it requires. */
+    let counter = 0;
+    const index = new Map(), lowLink = new Map(), stack = [], onStack = new Set();
+    const work = [[String(id), 0]];
+    while (work.length) {
+      const frame = work[work.length - 1];
+      const [v, i] = frame;
+      const f = factoryOf(factories, v);
+      if (i === 0) { index.set(v, counter); lowLink.set(v, counter); counter++; stack.push(v); onStack.add(v); }
+      const deps = ownOf(factories, f).deps;
+      if (i < deps.length) {
+        frame[1]++;
+        const d = String(deps[i]), df = factoryOf(factories, d);
+        if (!df || factoryKeys.has(df)) continue;
+        if (!index.has(d)) work.push([d, 0]);
+        else if (onStack.has(d)) lowLink.set(v, Math.min(lowLink.get(v), index.get(d)));
+        continue;
+      }
+      work.pop();
+      if (work.length) { const parent = work[work.length - 1][0]; lowLink.set(parent, Math.min(lowLink.get(parent), lowLink.get(v))); }
+      if (lowLink.get(v) !== index.get(v)) continue;
+      const members = [];
+      let m;
+      do { m = stack.pop(); onStack.delete(m); members.push(m); } while (m !== v);
+      const inside = new Set(members);
+      /* What each member requires outside the component, by key (or by its low id when this runtime lacks it). */
+      const outside = (x) => ownOf(factories, factoryOf(factories, x)).deps.map((d) => {
+        if (inside.has(String(d))) return "";
+        const df = factoryOf(factories, d);
+        return df ? factoryKeys.get(df) : `missing:${low(d)}`;
+      }).join(",");
+      const component = sha(members.map((x) => `${ownOf(factories, factoryOf(factories, x)).hash}(${outside(x)})`).sort().join("|"));
+      for (const x of members) {
+        const xf = factoryOf(factories, x);
+        const key = `${/^\d+$/.test(x) ? low(x) : x}:${sha(`${component}:${ownOf(factories, xf).hash}(${outside(x)})`)}`;
+        factoryKeys.set(xf, key);
+      }
+    }
+    return factoryKeys.get(factory) ?? null;
   }
 
   globalThis.__NEXT_ZONES_OWN_MODULE__ = (cache, id) => {

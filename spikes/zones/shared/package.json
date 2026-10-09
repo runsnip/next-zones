@@ -1,1 +1,1 @@
-{"name": "@spike/shared", "private": true, "type": "module", "exports": {"./server": "./server.js", "./badge": "./badge.js", "./context": "./context.js", "./context-lib": "./context-lib.js"}, "sideEffects": ["./badge.js", "./server.js"]}
+{"name": "@spike/shared", "private": true, "type": "module", "exports": {"./server": "./server.js", "./badge": "./badge.js", "./context": "./context.js", "./context-lib": "./context-lib.js", "./server-wrap": "./server-wrap.js"}, "sideEffects": ["./badge.js", "./server.js"]}

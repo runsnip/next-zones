@@ -1021,3 +1021,27 @@ files kept.
 apps needs; using the exports from outside recovers a third of the cost and cannot be shown complete. The next step
 is upstream: a per-package (or per-module) setting to keep exports, or trimming to the union of what the builds
 use. Until then a build for Zones keeps every export (D8 as it was): 5–8% of a page's JavaScript.
+
+## D10: builds where the zone is, and a Merkle key on the server
+
+**Before:** each version of a zone was built from a copy, `<zone>@<version>`, so that its own modules had ids of their
+own: an open tab would otherwise keep v1's factories after a swap.
+
+**Tried:** building each version where the zone is. In the browser that already held: a module that differs from what
+the browser may hold (the earlier versions' among it) gets a new id at install (zone-client.cjs). On the server it did
+not: after a swap to v2, a route handler still answered v1. The registry keyed a module by its id and its own code,
+and the module that wraps a route handler has the same code in both versions (it names the handler by id), so v2 got
+v1's wrapper, bound to v1's handler.
+
+**The same bug without copies:** a shared module whose code is the same in two builds over a dependency that differs
+(`shared/server-wrap.js` over `shared/server-variant.js`, which shop v2 builds with another value) was handed from the
+shell to shop v2: shop v2 read "wrapped base", the shell's. The copies never covered it (a shared module's path is the
+same in every build). `sharedver.mjs` checks it now, and failed on the old registry.
+
+**Fixed:** the registry's key is a Merkle hash, as the browser's identity already was: a module's own code (long
+numbers modulo 10^4), then the keys of the modules it requires (every number of three digits or more in its code that
+is an id this runtime has), in order; a cycle is one component (Tarjan), keyed by its members; a dependency the
+runtime has not loaded counts by its id. Each factory is keyed once.
+
+**Then D10 settled:** `next-zones build` builds every zone where it is (no copy, Turbopack's cache reused by the next
+version). The checks: 49/49 with images built so.

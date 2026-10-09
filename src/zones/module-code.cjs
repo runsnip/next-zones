@@ -49,7 +49,7 @@ class Scope {
  * Reads a factory (its source text, a function or arrow expression).
  * @returns {{ canonical: string, requires: { id: string, method: string, start: number, end: number }[], runtimeMethods: Set<string> }}
  */
-function readModule(source) {
+function readModule(source, { strict: inStrictScope = false } = {}) {
   if (!acorn) throw new Error("next-zones: module-code.cjs has no parser (useParser)");
   const ast = acorn.parseExpressionAt(source, 0, { ecmaVersion: "latest", sourceType: "script", allowHashBang: false });
   const requires = [], runtimeMethods = new Set();
@@ -107,7 +107,10 @@ function readModule(source) {
     if (fn.type === "FunctionExpression" && fn.id) walk(fn.id, outer, bodyStrict);
     for (const p of fn.params) walk(p, scope, bodyStrict);
     emit("|");
-    if (fn.body.type === "BlockStatement") walkStatements(fn.body.body, body, bodyStrict); else walk(fn.body, body, bodyStrict);
+    /* The factory's own "use strict" is its strictness, read once below: a strict factory written in a strict scope
+       (Next 16.4's nested strict array) and one written with the directive are the same module. */
+    const statements = fn === ast && fn.body.type === "BlockStatement" ? fn.body.body.filter((st) => !(st.directive === "use strict")) : fn.body.body;
+    if (fn.body.type === "BlockStatement") walkStatements(statements, body, bodyStrict); else walk(fn.body, body, bodyStrict);
     emit(")");
   }
   function walkStatements(statements, scope, strict) { emit("{"); for (const s of statements) walk(s, scope, strict); emit("}"); }
@@ -250,12 +253,13 @@ function readModule(source) {
     emit("/");
   }
 
+  const factoryStrict = inStrictScope || (/Function/.test(ast.type) && ast.body.type === "BlockStatement" && isStrict(ast.body.body));
   const top = new Scope(null, true);
-  walk(ast, top, false);
+  walk(ast, top, factoryStrict);
   /* Read again keeping every name: the dynamic case is only known once read. */
-  if (dynamic) { out.length = 0; counter = 0; context = null; requires.length = 0; runtimeMethods.clear(); privates.length = 0; walk(ast, new Scope(null, true), false); }
+  if (dynamic) { out.length = 0; counter = 0; context = null; requires.length = 0; runtimeMethods.clear(); privates.length = 0; walk(ast, new Scope(null, true), factoryStrict); }
   /* Joined by newlines, which no token holds (strings are JSON): the form reads back one way only. */
-  return { canonical: out.join("\n"), requires, runtimeMethods };
+  return { canonical: `${factoryStrict ? "strict" : "sloppy"}\n${out.join("\n")}`, requires, runtimeMethods };
 }
 
 /** The source with each required id replaced through `idMap` (id → new id), by the positions readModule found. */

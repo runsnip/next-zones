@@ -3,9 +3,8 @@
  *
  *   buildZone({ zonesDir, zone, version, store })      (next-zones build <zone> runs it, through buildWorkspace below)
  *
- * - The build runs from <zones dir>/<zone>@<version>, a copy at the same depth. Turbopack derives module ids from
- *   the path under the workspace root, so the zone's own modules get ids of their own per version (an open tab that
- *   loaded v1 would otherwise keep v1's client code after a swap). Shared modules keep their paths, so their ids.
+ * - The build runs in the zone's own folder. Two versions may give one id to different modules: Zones keys modules by
+ *   what they are, their dependencies included (zone-client.cjs in the browser, registry.cjs on the server).
  * - ZONE_VERSION is set for the build.
  * - The store gets <store>/<zone>/<version>/: the build, the zone's public/ (not part of a Next build), and zone.json:
  *   name, version, mount, aliases (from the zone's next.config, with readZone()), the Next and React it was built
@@ -39,64 +38,53 @@ import { isExport, linkStaticSite } from "./link.mjs";
  */
 export async function buildZone({ zonesDir, zone: name, version = "1", store: storeArg, quiet = false }) {
   const source = path.resolve(zonesDir, name);
-  const work = path.resolve(zonesDir, `${name}@${version}`);
+  /* Built where it is: no copy per version (debt D10, settled). A module's identity is what it is, its dependencies
+     included, in the browser (zone-client.cjs: a module that differs from what the browser may hold gets a new id) and
+     on the server (registry.cjs): v1 and v2 of a zone may give one id to different modules. Turbopack's cache in
+     .next/cache is reused by the next version's build. */
+  const work = source;
   const store = path.resolve(storeArg ?? process.env.NEXT_ZONES_STORE ?? path.join(zonesDir, ".zones-store"));
   if (!fs.existsSync(source)) throw new Error(`no zone at ${source}`);
 
-  fs.rmSync(work, { recursive: true, force: true });
-  fs.cpSync(source, work, { recursive: true, filter: (src) => !/[\\/](\.next|node_modules)$/.test(src) });
-  /* The zone's own node_modules (packages the workspace did not hoist) are linked, not copied: the copy resolves them
-     as the zone does. The link stays inside the workspace, so inside Turbopack's root. */
-  if (fs.existsSync(path.join(source, "node_modules"))) fs.symlinkSync(path.join(source, "node_modules"), path.join(work, "node_modules"), "dir");
-  try {
-    /* The copy is not a workspace of its own: its package name must not clash with the zone's. */
-    const pkgFile = path.join(work, "package.json");
-    if (fs.existsSync(pkgFile)) {
-      const pkg = JSON.parse(fs.readFileSync(pkgFile, "utf8"));
-      fs.writeFileSync(pkgFile, JSON.stringify({ ...pkg, name: `${name}-build-${version}` }, null, 2));
-    }
-    const next = createRequire(path.join(work, "package.json")).resolve("next/dist/bin/next");
-    const built = spawnSync(process.execPath, [next, "build"], { cwd: work, stdio: quiet ? ["ignore", "ignore", "inherit"] : "inherit", env: { ...process.env, ZONE_VERSION: version, NEXT_ZONES_BUILD: "zones" } });
-    if (built.status !== 0) throw new Error(`next build failed for ${name}@${version} (exit ${built.status})`);
+  const next = createRequire(path.join(work, "package.json")).resolve("next/dist/bin/next");
+  const built = spawnSync(process.execPath, [next, "build"], { cwd: work, stdio: quiet ? ["ignore", "ignore", "inherit"] : "inherit", env: { ...process.env, ZONE_VERSION: version, NEXT_ZONES_BUILD: "zones" } });
+  if (built.status !== 0) throw new Error(`next build failed for ${name}@${version} (exit ${built.status})`);
 
-    process.env.ZONE_VERSION = version;
-    const zone = await readZone(work);
-    if (!zone) throw new Error(`${source}: its next.config does not use zoneConfig()`);
-    const target = path.join(store, name, version);
-    fs.rmSync(target, { recursive: true, force: true });
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    /* The build, without what only building needs: Turbopack's build cache (most of the size), traces, diagnostics,
-       generated types and file traces. Zones keeps a zone image's own cache elsewhere. */
-    const BUILD_ONLY = new Set(["cache", "trace", "trace-build", "diagnostics", "types", "standalone"]);
-    fs.cpSync(path.join(work, ".next"), target, {
-      recursive: true,
-      filter: (src) => {
-        const rel = path.relative(path.join(work, ".next"), src);
-        return !BUILD_ONLY.has(rel.split(path.sep)[0]) && !(!rel.includes(path.sep) && rel.endsWith(".nft.json"));
-      },
-    });
-    /* Next's output: "standalone" in the zone's own config: the image carries the packages its server traces need,
-       as a standalone folder would (standalone.mjs), so it runs where the workspace's node_modules is not. */
-    if (isStandalone(path.join(work, ".next"))) copyTracedPackages(path.join(work, ".next"), target);
-    /* Next's output: "export" in the zone's own config: the image keeps the export too, for the static link (link.mjs). */
-    if (isExport(path.join(work, ".next")) && fs.existsSync(path.join(work, "out"))) fs.cpSync(path.join(work, "out"), path.join(target, "out"), { recursive: true });
-    /* public/ is not part of a Next build: the store keeps it beside the build. */
-    if (fs.existsSync(path.join(work, "public"))) fs.cpSync(path.join(work, "public"), path.join(target, "public"), { recursive: true });
-    /* The Next and React the zone was built with: Zones refuses a zone whose shared packages differ from its own. */
-    const requireFromZone = createRequire(path.join(work, "package.json"));
-    const builtWith = Object.fromEntries(["next", "react", "react-dom"].map((pkg) => [pkg, requireFromZone(`${pkg}/package.json`).version]));
-    /* instrumentation-client is bundled into the zone's own documents only; Zones refuses it, so it is recorded. */
-    const clientInstrumentation = ["", "src"].some((dir) => ["ts", "tsx", "js", "mjs"].some((ext) => fs.existsSync(path.join(work, dir, `instrumentation-client.${ext}`))));
-    /* What Zones needs to install it, read from the build once, here (D2), and the build's integrity, which Zones
-       checks before it installs it. */
-    const { describeBuild, digestBuild } = createRequire(import.meta.url)("./zones/describe.cjs");
-    const install = describeBuild(target);
-    const integrity = digestBuild(target);
-    fs.writeFileSync(path.join(target, "zone.json"), JSON.stringify({ name, version, ...zone, built: builtWith, clientInstrumentation, integrity, install }, null, 2) + "\n");
-    return target;
-  } finally {
-    fs.rmSync(work, { recursive: true, force: true });
-  }
+  process.env.ZONE_VERSION = version;
+  const zone = await readZone(work);
+  if (!zone) throw new Error(`${source}: its next.config does not use zoneConfig()`);
+  const target = path.join(store, name, version);
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  /* The build, without what only building needs: Turbopack's build cache (most of the size), traces, diagnostics,
+     generated types and file traces. Zones keeps a zone image's own cache elsewhere. */
+  const BUILD_ONLY = new Set(["cache", "trace", "trace-build", "diagnostics", "types", "standalone"]);
+  fs.cpSync(path.join(work, ".next"), target, {
+    recursive: true,
+    filter: (src) => {
+      const rel = path.relative(path.join(work, ".next"), src);
+      return !BUILD_ONLY.has(rel.split(path.sep)[0]) && !(!rel.includes(path.sep) && rel.endsWith(".nft.json"));
+    },
+  });
+  /* Next's output: "standalone" in the zone's own config: the image carries the packages its server traces need,
+     as a standalone folder would (standalone.mjs), so it runs where the workspace's node_modules is not. */
+  if (isStandalone(path.join(work, ".next"))) copyTracedPackages(path.join(work, ".next"), target);
+  /* Next's output: "export" in the zone's own config: the image keeps the export too, for the static link (link.mjs). */
+  if (isExport(path.join(work, ".next")) && fs.existsSync(path.join(work, "out"))) fs.cpSync(path.join(work, "out"), path.join(target, "out"), { recursive: true });
+  /* public/ is not part of a Next build: the store keeps it beside the build. */
+  if (fs.existsSync(path.join(work, "public"))) fs.cpSync(path.join(work, "public"), path.join(target, "public"), { recursive: true });
+  /* The Next and React the zone was built with: Zones refuses a zone whose shared packages differ from its own. */
+  const requireFromZone = createRequire(path.join(work, "package.json"));
+  const builtWith = Object.fromEntries(["next", "react", "react-dom"].map((pkg) => [pkg, requireFromZone(`${pkg}/package.json`).version]));
+  /* instrumentation-client is bundled into the zone's own documents only; Zones refuses it, so it is recorded. */
+  const clientInstrumentation = ["", "src"].some((dir) => ["ts", "tsx", "js", "mjs"].some((ext) => fs.existsSync(path.join(work, dir, `instrumentation-client.${ext}`))));
+  /* What Zones needs to install it, read from the build once, here (D2), and the build's integrity, which Zones
+     checks before it installs it. */
+  const { describeBuild, digestBuild } = createRequire(import.meta.url)("./zones/describe.cjs");
+  const install = describeBuild(target);
+  const integrity = digestBuild(target);
+  fs.writeFileSync(path.join(target, "zone.json"), JSON.stringify({ name, version, ...zone, built: builtWith, clientInstrumentation, integrity, install }, null, 2) + "\n");
+  return target;
 }
 
 /** The version an image of `dir` is built as: `version`, else the zone's package.json version. */

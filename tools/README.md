@@ -4,7 +4,7 @@ Tools for developing next-zones itself. The CLI for users is in `src/` (`next-zo
 
 | Tool | What it does |
 |---|---|
-| `build-zone.mjs <zones dir> <zone> <version> [--store <dir>]` | Builds one version of a zone into a zone store: the build, plus `zone.json` (name, version, mount, aliases). It builds from `<zone>@<version>`, so each version gets module ids of its own |
+| `build-zone.mjs <zones dir> <zone> <version> [--store <dir>]` | Builds one version of a zone into a zone store: the build, plus `zone.json` (name, version, mount, aliases). It builds the zone where it is |
 | `bench/activation.mjs [--url URL] [--runs N] [--pad N] [--dynamic N] [--lru N]` | Activation benchmark on a running Zones service: `prepare` and the switch, phase by phase, at a given app size |
 | `bench/latency.mjs [--url URL] [--paths a,b] [--n N] [--warmup N]` | Request latency through a running Zones service, p50 / p95 / p99 |
 

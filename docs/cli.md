@@ -73,9 +73,10 @@ shell declares what the workspace builds to, with `zoneConfig({ mount: "/", mode
   versions a previous run left live), and pulls a pinned version the store lacks from `.zones-images` or `--source`.
   `.zones-images` stays a source while it runs, so `next-zones build <zone> --pack` then a ping installs the new one.
 
-**About `build`.** It builds from a copy named `<zone>@<version>`, beside the zone, so each version's modules have
-their own ids: an open tab then runs the new version's client code after a swap. The store defaults to
-`NEXT_ZONES_STORE`, else `<zones dir>/.zones-store`.
+**About `build`.** It builds each zone where it is, as `next build` would (Turbopack's cache is reused from one version
+to the next). Two versions may give one id to different modules; Zones tells them apart by what each module is, its
+dependencies included: an open tab runs the new version's client code after a swap, and the server never hands one
+version another's module. The store defaults to `NEXT_ZONES_STORE`, else `<zones dir>/.zones-store`.
 
 ## `next-zones check`
 

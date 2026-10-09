@@ -3,7 +3,9 @@
  * render "badge <label>", shop v2 renders "badge v2 <label>". Same module path, so the same module id. After a soft
  * navigation from the shell into shop v2, the browser must run shop v2's component, and the shell's own must stay
  * the shell's. The badge counts its evaluations (state of its own), so installing shop v2 reports it: the shop gets a
- * copy of its own, which is right here, and a warning, which would tell of two copies of a context.
+ * copy of its own, which is right here, and a warning, which would tell of two copies of a context. On the server, a
+ * shared module whose code is the same in every build over a dependency that differs (server-wrap.js over
+ * server-variant.js) must run over each build's own dependency: the shell reads "wrapped base", shop v2 "wrapped v2".
  */
 import { createRequire } from "node:module";
 
@@ -16,6 +18,8 @@ for (const [name, version] of [["blog", 1], ["shop", 2]]) {
   if (!r.name) { console.log(JSON.stringify(r)); process.exit(1); }
   warnings[name] = r.warnings ?? [];
 }
+/* The shell's runtime runs the shared wrapper first (a dynamic page), so a wrong share would hand shop v2 its instance. */
+const wrappedShell = (/id="wrapped">([^<]*)</.exec(await (await fetch(`${BASE}/about`)).text()) ?? [])[1];
 const browser = await chromium.launch();
 const page = await browser.newPage();
 const errors = [];
@@ -30,7 +34,16 @@ await page.click("text=home"); await page.waitForSelector("#badge-shell");
 const shellAgain = await page.textContent("#badge-shell");
 await page.goto(`${BASE}/shop`);
 const direct = await page.textContent("#badge-shop");
+const wrappedShop = await page.textContent("#wrapped");
 const warned = { blog: warnings.blog.length, shop: warnings.shop.some((w) => w.includes("__sharedClientEvals")) };
-const wrong = soft.badge !== "badge v2 shop" || direct !== "badge v2 shop" || shellAgain !== "badge shell" || warned.blog !== 0 || !warned.shop ? "yes" : {};
-console.log(JSON.stringify({ shellBadge, soft, shellAgain, direct, warned, warnings: warnings.shop, wrong, errors }, null, 2));
+/* Each failure by name: check-all counts a non-empty "wrong" object. */
+const wrong = {};
+if (soft.badge !== "badge v2 shop") wrong.soft = soft.badge;
+if (direct !== "badge v2 shop") wrong.direct = direct;
+if (shellAgain !== "badge shell") wrong.shellAgain = shellAgain;
+if (warned.blog !== 0) wrong.blogWarned = warnings.blog;
+if (!warned.shop) wrong.shopNotWarned = warnings.shop;
+if (wrappedShop !== "wrapped v2") wrong.wrappedShop = wrappedShop;
+if (wrappedShell !== "wrapped base") wrong.wrappedShell = wrappedShell;
+console.log(JSON.stringify({ shellBadge, soft, shellAgain, direct, wrappedShop, wrappedShell, warned, warnings: warnings.shop, wrong, errors }, null, 2));
 await browser.close();

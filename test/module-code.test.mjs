@@ -93,3 +93,9 @@ test("holdsState names a module with state of its own, and not a stateless one",
     `e=>{function f(){}(0,Object.defineProperty)(f,"name",{value:"g"});e.s(["f",0,f])}`,
   ]) assert.equal(holdsState(stateless), null, stateless);
 });
+
+test("a strict factory is one module whether its directive or its scope makes it strict", { skip }, () => {
+  const withDirective = `e=>{"use strict";var t=e.i(1);e.s(["x",0,()=>t])}`, inScope = `e=>{var t=e.i(1);e.s(["x",0,()=>t])}`;
+  assert.equal(readModule(withDirective).canonical, readModule(inScope, { strict: true }).canonical);
+  assert.notEqual(readModule(inScope).canonical, readModule(inScope, { strict: true }).canonical);
+});

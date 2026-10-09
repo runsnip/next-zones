@@ -1,7 +1,6 @@
 /*
- * A zone's own node_modules (a package the workspace did not hoist) is reached by `next-zones build`, which builds from
- * a copy of the zone (<zone>@<version>): the zone imports a package that exists only in its own node_modules, is built
- * into the store, installed on Zones and served.
+ * A zone's own node_modules (a package the workspace did not hoist) is reached by `next-zones build`: the zone imports a
+ * package that exists only in its own node_modules, is built into the store, installed on Zones and served.
  */
 import fs from "node:fs";
 import path from "node:path";
