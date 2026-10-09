@@ -31,7 +31,6 @@
   },
   "files": [
     "src",
-    "dist",
     "tsconfig",
     "LICENSE",
     "NOTICE",
@@ -43,29 +42,42 @@
   "exports": {
     "./config": {
       "types": "./src/config.d.mts",
+      "import": "./src/config.mjs",
+      "require": "./src/config.mjs",
       "default": "./src/config.mjs"
     },
     "./client": {
       "types": "./src/client.d.mts",
+      "import": "./src/client.mjs",
+      "require": "./src/client.mjs",
       "default": "./src/client.mjs"
     },
     "./zones": {
       "types": "./src/zones/index.d.cts",
+      "import": "./src/zones/index.cjs",
+      "require": "./src/zones/index.cjs",
       "default": "./src/zones/index.cjs"
     },
     "./build": {
       "types": "./src/build.d.mts",
+      "import": "./src/build.mjs",
+      "require": "./src/build.mjs",
       "default": "./src/build.mjs"
     },
-    "./tsconfig/zone.json": "./tsconfig/zone.json",
     "./metrics": {
       "types": "./src/metrics.d.cts",
+      "import": "./src/metrics.cjs",
+      "require": "./src/metrics.cjs",
       "default": "./src/metrics.cjs"
     },
     "./sources": {
       "types": "./src/sources.d.cts",
+      "import": "./src/sources.cjs",
+      "require": "./src/sources.cjs",
       "default": "./src/sources.cjs"
-    }
+    },
+    "./tsconfig/zone.json": "./tsconfig/zone.json",
+    "./package.json": "./package.json"
   },
   "bin": {
     "next-zones": "./src/cli.mjs"
