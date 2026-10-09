@@ -129,6 +129,14 @@ runs in parallel, and their switches take turns.
 - **One React, and one copy of every module the zones share** (a layout, a UI kit, a database client), on the server
   and in the browser.
 - **Each zone's own modules stay its own,** and so does each version's: v1 and v2 never mix.
+- **A module is shared only when it is the same module:** the same code, whatever ids the builds gave it (a bigger
+  build has longer ids). A zone built against another version of a package than the shell gets its own copy of that
+  package's modules. That is right for code without state; a module with state (a context, a singleton) then exists
+  twice, and the zone does not see what the shell set up in it (a provider in the shell's layout, a client). The
+  install names such modules in its `warnings` (and the log); `createZones({ strictModules: true })` refuses the zone
+  instead. Build the shell and the zones against the same versions of what they share.
+- **One project root for every build:** Zones refuses a zone image built from another root than the shell's
+  ([configuration](configuration.md#the-project-root)).
 
 ## What works inside a zone
 
