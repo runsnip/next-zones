@@ -51,6 +51,16 @@ Zones refuses a shell or a zone image that was built without them, and says to b
 | `experimental.turbopackRemoveUnusedExports` | `false` | Turbopack drops the exports a build does not use. A library used by the shell and a zone then differs between their builds: the shell's copy has only what the shell uses. They load as two modules, so a context it creates exists twice, and a zone's hook does not see the shell's provider (found with `@tanstack/react-query`: "No QueryClient set") | Two real apps: client JS +1.9% and +3.4%, server JS +8.6% and +4.4% |
 | `experimental.turbopackRemoveUnusedImports` | `false` | Turbopack refuses to build with it on while unused exports are kept | Included above |
 
+### The project root
+
+Turbopack names every module by its path from the project root, and its module ids come from that name, so the shell
+and every zone image must be built from one root to share modules. Next infers the root from the topmost lockfile
+above the app: a lockfile added in a parent folder would move it, and rename every module of the builds after it. A
+build for Zones therefore pins it: `turbopack.root` and `outputFileTracingRoot` are set, when your config leaves them
+unset, to `NEXT_ZONES_ROOT`, or else to the nearest folder whose `node_modules` holds `next` (widened to hold that
+`node_modules` where it really is, when it is a link). Zones refuses a zone image built from another root than the
+shell's, and says so.
+
 Mode `"single"` links the same zone images into one app, where a module several builds use is also loaded once, so it
 needs them too. Debt D8 in the README tracks turning them back on (sharing modules by what they export, not by their
 whole code).
