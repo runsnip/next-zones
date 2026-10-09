@@ -86,7 +86,7 @@ Zones' work is on the server:
 | `'use cache'`, `cacheLife`, `cacheTag`, Cache Components / PPR | ✅ `cc.mjs` | On a shell and a zone that both set `cacheComponents: true` (`fixtures-cc`). The `'use cache'` value from the build is served across requests while the dynamic hole (a cookie) follows each request. `revalidateTag` renews it on the next read, written to the zone image's cache. A soft navigation from the shell renders both. `cacheComponents` must equal the shell's, or the zone is refused |
 | `unstable_cache`; `after` | ✅ `revalidate.mjs`; 🟡 | |
 | Draft mode | 🟡 | Uses the shell's preview keys (`prerender-manifest.preview`), which the overlay keeps |
-| Edge runtime in a zone | ⛔ refused ✅ | Edge routes have their own manifests and sandbox, unproved under Zones. A zone with edge routes (`middleware-manifest.functions`) is refused, naming them; checked against a real build |
+| Edge runtime in a zone | 🔧 refused ✅ | Edge routes have their own manifests and sandbox, unproved under Zones. A zone with edge routes (`middleware-manifest.functions`) is refused, naming them; checked against a real build |
 
 ## Assets
 
@@ -96,7 +96,7 @@ Zones' work is on the server:
 | CSS modules | ✅ `features.mjs` | Named in the route's client reference manifest |
 | Global CSS, Tailwind | 🟡 | Global CSS comes from the shared root layout |
 | `next/font` | ✅ `media.mjs` | The font CSS comes with the zone's CSS chunk; the font file is a zone static file; the preload `<link>` is emitted |
-| `next/image` | ✅ `media.mjs` for local images; ⛔ refused ✅ for a zone's own `images` config | The optimizer fetches local images through Next's handler directly, so Zones hooks `fetchInternalImage`. It runs with the shell's `images` config, so a zone whose `remotePatterns`, `domains`, `localPatterns`, `unoptimized` or `dangerouslyAllow*` differ is refused (put them in the shell's config); checked against a real build |
+| `next/image` | ✅ `media.mjs` for local images; 🔧 refused ✅ for a zone's own `images` config | The optimizer fetches local images through Next's handler directly, so Zones hooks `fetchInternalImage`. It runs with the shell's `images` config, so a zone that sets `remotePatterns`, `domains`, `localPatterns`, `unoptimized` or `dangerouslyAllow*` of its own (not Next's default) and differently from the shell is refused (put them in the shell's config); a zone with no `images` config fits any shell (`test/image-config.test.mjs`); checked against a real build |
 | `public/` of a zone | ✅ `media.mjs` | Stored beside the build by `tools/build-zone.mjs`, served under the zone's mount ahead of dynamic routes, `max-age=0`. Files outside the mount are refused |
 | `next/script` | 🟡 | Client side |
 
@@ -104,7 +104,7 @@ Zones' work is on the server:
 
 | Area | Status | How |
 |---|---|---|
-| A zone with `pages/` | 🔧 | Not supported yet; next-zones is App Router only. The Pages Router client keeps the build's page list (`_buildManifest.js`, `sortedPages`) and hard-navigates to any page it does not know. A zone's pages would need a merged `_buildManifest.js` served by Zones, plus `PAGES` matchers and a merged `pages-manifest` |
+| A zone with `pages/` | 🔧 refused ✅ `pages.mjs` | Not supported yet; next-zones is App Router only, and a zone with Pages Router routes (its `pages-manifest`, Next's own `/404` and `/500` aside) is refused at install, naming them. The Pages Router client keeps the build's page list (`_buildManifest.js`, `sortedPages`) and hard-navigates to any page it does not know. A zone's pages would need a merged `_buildManifest.js` served by Zones, plus `PAGES` matchers and a merged `pages-manifest` |
 
 ## Process and build
 

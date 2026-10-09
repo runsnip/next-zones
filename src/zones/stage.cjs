@@ -14,6 +14,7 @@ const crypto = require("node:crypto");
 const { Worker } = require("node:worker_threads");
 const { ZoneError } = require("./context.cjs");
 const { describeBuild, buildKey, FORMAT, CONFIG_KEYS } = require("./describe.cjs");
+const { imageKeysDiffering } = require("./image-config.cjs");
 
 const runWorker = (file, workerData) => new Promise((resolve, reject) => {
   const worker = new Worker(path.join(__dirname, file), { workerData });
@@ -112,14 +113,19 @@ function createStaging(ctx) {
       }
     }
     if (identity.clientInstrumentation) throw new ZoneError(`zone "${name}" has an instrumentation-client file, which runs only in its own documents, not when it is reached from the shell: move it into the shell's`);
+    /* Pages Router routes: Zones serves a zone's app/ routes only, so a pages/ route would answer the shell's 404. Next's
+       own pages (/_app, /_document, /_error, /404, /500) are in every build. */
+    let pagesManifest = {};
+    try { pagesManifest = JSON.parse(await fs.promises.readFile(path.join(serverDir, "pages-manifest.json"), "utf8")); } catch {}
+    const pagesRoutes = Object.keys(pagesManifest).filter((route) => !["/_app", "/_document", "/_error", "/404", "/500"].includes(route));
+    if (pagesRoutes.length) throw new ZoneError(`zone "${name}" has Pages Router routes (${pagesRoutes.join(", ")}), not supported under Zones yet: move them into app/`);
     /* Edge routes have their own manifests and sandbox, not proved under Zones. */
     if (info.edgeFunctions.length) throw new ZoneError(`zone "${name}" has edge routes (${info.edgeFunctions.join(", ")}), not supported under Zones yet: use the Node.js runtime`);
-    /* What shapes every URL must be the shell's. The image optimizer runs with the shell's images config: a zone whose
-       own would allow more is refused, so its images never fail silently. */
+    /* What shapes every URL must be the shell's. The image optimizer runs with the shell's images config: a zone that
+       set its own, otherwise, is refused, so its images never fail silently (image-config.cjs). */
     const shellNow = shell();
-    const imageKeys = ["remotePatterns", "domains", "localPatterns", "unoptimized", "dangerouslyAllowSVG", "dangerouslyAllowLocalIP"];
     if (info.missingBuildOptions.length) throw new ZoneError(`zone "${name}" ${identity.version} was not built for Zones (it lacks ${info.missingBuildOptions.join(", ")}): build it with next-zones build`);
-    const imageDiffers = imageKeys.filter((key) => JSON.stringify(info.config.images?.[key] ?? null) !== JSON.stringify(shellNow.config.images?.[key] ?? null));
+    const imageDiffers = imageKeysDiffering(info.config.images, shellNow.config.images);
     if (imageDiffers.length) throw new ZoneError(`zone "${name}": images.${imageDiffers.join(", images.")} differ from the shell's, whose images config serves every zone: put them in the shell's next.config`);
     const differs = ["basePath", "i18n", "trailingSlash", "assetPrefix", "skipTrailingSlashRedirect", "cacheComponents", "partialPrefetching"]
       .filter((key) => JSON.stringify(info.config[key] ?? null) !== JSON.stringify(shellNow.config[key] ?? null));

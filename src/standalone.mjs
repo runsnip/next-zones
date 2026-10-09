@@ -72,7 +72,7 @@ export function standaloneServerDir(appDir) {
  * Makes the shell's standalone folder the deploy of Zones (see above). `declaration` is the shell's zone declaration;
  * `store` and `pins` what next-zones build made. Returns { dir, entry } (entry: zones.js).
  */
-export async function prepareStandaloneZones({ shellDir, declaration, store, pins }) {
+export async function prepareStandaloneZones({ shellDir, declaration, store, pins, policy }) {
   const dir = standaloneServerDir(shellDir);
   const root = path.join(shellDir, ".next", "standalone");
   /* What Next leaves to the deploy. */
@@ -92,6 +92,7 @@ export async function prepareStandaloneZones({ shellDir, declaration, store, pin
   /* The images built and the pins: the folder is the whole deploy. */
   if (store && fs.existsSync(store)) fs.cpSync(store, path.join(dir, ".zones-store"), { recursive: true, verbatimSymlinks: true });
   if (pins && fs.existsSync(pins)) fs.copyFileSync(pins, path.join(dir, "zones.json"));
+  if (policy && fs.existsSync(policy)) fs.copyFileSync(policy, path.join(dir, "zones.config.json"));
   const entry = path.join(dir, "zones.js");
   fs.writeFileSync(entry, ZONES_ENTRY);
   return { dir, entry };
@@ -137,7 +138,8 @@ async function traceZonesRuntime({ shellDir, root }) {
 /* zones.js: Zones started the way Next's standalone server.js starts Next, from the config the build recorded. */
 const ZONES_ENTRY = `/* Written by next-zones build: Zones for this standalone folder, as server.js is Next's. Environment: PORT,
    HOSTNAME, NEXT_ZONES_STORE (default ./.zones-store), NEXT_ZONES_CACHE, NEXT_ZONES_ADMIN_TOKEN, NEXT_ZONES_SOURCES (a
-   comma-separated list of folders or http(s) templates with {zone} and {version}). */
+   comma-separated list of folders or http(s) templates with {zone} and {version}), NEXT_ZONES_CONNECTOR with
+   NEXT_ZONES_CONNECTOR_OWNER and NEXT_ZONES_CONNECTOR_TOKEN (service-connector as one more source). */
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -147,15 +149,22 @@ const { config } = JSON.parse(fs.readFileSync(path.join(__dirname, ".next", "req
 process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(config);
 
 const { createZones } = require("@runsnip/next-zones/zones");
-const { fromDirectory, fromHttp } = require("@runsnip/next-zones/sources");
-const pinsFile = path.join(__dirname, "zones.json");
+const { fromDirectory, fromHttp, fromConnector } = require("@runsnip/next-zones/sources");
+const sources = (process.env.NEXT_ZONES_SOURCES ?? "").split(",").filter(Boolean).map((s) => (/^https?:\\/\\//.test(s) ? fromHttp(s) : fromDirectory(path.resolve(s))));
+if (process.env.NEXT_ZONES_CONNECTOR) {
+  if (!process.env.NEXT_ZONES_CONNECTOR_OWNER) { console.error("next-zones: NEXT_ZONES_CONNECTOR needs NEXT_ZONES_CONNECTOR_OWNER"); process.exit(1); }
+  sources.push(fromConnector({ origin: process.env.NEXT_ZONES_CONNECTOR, owner: process.env.NEXT_ZONES_CONNECTOR_OWNER, token: process.env.NEXT_ZONES_CONNECTOR_TOKEN }));
+}
+const pinsFile = path.join(__dirname, "zones.json"), policyFile = path.join(__dirname, "zones.config.json");
 const zones = createZones({
   shell: __dirname,
   store: process.env.NEXT_ZONES_STORE ?? path.join(__dirname, ".zones-store"),
   cacheDir: process.env.NEXT_ZONES_CACHE,
   adminToken: process.env.NEXT_ZONES_ADMIN_TOKEN,
   pins: fs.existsSync(pinsFile) ? JSON.parse(fs.readFileSync(pinsFile, "utf8")).zones ?? {} : {},
-  sources: (process.env.NEXT_ZONES_SOURCES ?? "").split(",").filter(Boolean).map((s) => (/^https?:\\/\\//.test(s) ? fromHttp(s) : fromDirectory(path.resolve(s)))),
+  pinsAt: fs.existsSync(pinsFile) ? fs.statSync(pinsFile).mtimeMs : 0,
+  ...(fs.existsSync(policyFile) ? { policy: JSON.parse(fs.readFileSync(policyFile, "utf8")) } : {}),
+  sources,
 });
 const port = parseInt(process.env.PORT, 10) || 3000, hostname = process.env.HOSTNAME || "0.0.0.0";
 zones.listen(port, hostname).then(() => console.log(\`Zones on http://\${hostname}:\${port}\`)).catch((error) => { console.error(error); process.exit(1); });

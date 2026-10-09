@@ -131,7 +131,7 @@ export async function init({ dir, zones = [], install: doInstall = true }) {
   if (pm === "pnpm") write(root, "pnpm-workspace.yaml", `packages:\n${members.map((m) => `  - ${m}\n`).join("")}`);
   /* A copy of next-zones from a folder must be copied in, not linked: Turbopack refuses files outside its root. */
   if (spec.startsWith("file:") && pm === "npm") write(root, ".npmrc", "install-links=true\n");
-  write(root, ".gitignore", ["node_modules/", ".next/", "next-env.d.ts", "*.tsbuildinfo", ".zones-dev/", ".zones-store/", ".zones-images/", ".zones-cache/", ""].join("\n"));
+  write(root, ".gitignore", ["node_modules/", ".next/", "next-env.d.ts", "*.tsbuildinfo", ".zones-dev/", ".zones-store/", ".zones-images/", ".zones-cache/", ".zones-app/", ".zones-export/", ""].join("\n"));
 
   write(root, "shared/package.json", json({
     name: "shared", private: true,

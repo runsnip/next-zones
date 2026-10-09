@@ -194,6 +194,7 @@ async function start() {
      while Zones runs, and a ping installs what it added. */
   rest.push("--source", path.join(dir, ".zones-images"));
   if (!rest.includes("--pins")) rest.push("--pins", path.join(dir, "zones.json"));
+  if (!rest.includes("--policy")) rest.push("--policy", path.join(dir, "zones.config.json"));
   if (!rest.includes("--store") && !process.env.NEXT_ZONES_STORE) rest.push("--store", path.join(dir, ".zones-store"));
   rest.push("--shell", shell.dir);
   await serve();
@@ -210,11 +211,19 @@ async function serve() {
     try { pins = JSON.parse(fs.readFileSync(pinsFile, "utf8")).zones ?? {}; pinsAt = fs.statSync(pinsFile).mtimeMs; }
     catch (error) { console.error(`next-zones: ${pinsFile} is not valid JSON: ${error.message}`); process.exit(1); }
   }
+  /* The workspace's policy (zones.config.json: { instrumentation: { shell: { skip }, own } }), when there is one. */
+  const policyFile = flag("policy", "zones.config.json");
+  let policy;
+  if (fs.existsSync(policyFile)) {
+    try { policy = JSON.parse(fs.readFileSync(policyFile, "utf8")); }
+    catch (error) { console.error(`next-zones: ${policyFile} is not valid JSON: ${error.message}`); process.exit(1); }
+  }
   /* Sources: where zone images are pulled from (an http(s) template with {zone} and {version}, or a folder). Without
      them Zones installs what is in its store only. */
   const noPrune = takeSwitch("no-prune"), keep = flag("keep"), minFree = flag("min-free");
   const options = {
     shell, store: flag("store", process.env.NEXT_ZONES_STORE), cacheDir: flag("cache"), adminToken: process.env.NEXT_ZONES_ADMIN_TOKEN, pins, pinsAt,
+    ...(policy ? { policy } : {}),
     sources: takeSources(),
     prune: noPrune ? false : { keep: keep === undefined ? 2 : wholeNumber(keep, "--keep") },
     ...(minFree !== undefined ? { minFree: wholeNumber(minFree, "--min-free") * 1048576 } : {}),

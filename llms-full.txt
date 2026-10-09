@@ -1,0 +1,1357 @@
+# next-zones
+
+> Zones for Next.js (`@runsnip/next-zones`, Apache-2.0). Build each part of a product as its own Next.js app (App Router), a *zone*, with its own version, and serve them all as one app: one origin, one Node process, soft `<Link>` navigation between zones with client state kept, one React, and a module the zones share loaded once. A new version of a zone is installed into the running server without a restart, and rolled back the same way. Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0 (production server, Turbopack), Node.js 24.
+
+This file is for language models. `llms-full.txt`, beside it, holds every page of the documentation in one file. In an installed project both are in `node_modules/@runsnip/next-zones/`.
+
+## Essentials
+
+These are the facts an assistant most often gets wrong. Each is detailed in the pages below.
+
+- **Not Next.js Multi-Zones.** Next's Multi-Zones runs one server per zone and hard-navigates between them. next-zones runs every zone in one process (Zones) with soft navigation. Do not answer with `basePath` per zone, `rewrites` to other servers or `assetPrefix`.
+- **A zone is a normal Next.js app.** It builds with `next build` and runs alone with `next start`; next-zones is needed only to serve zones together.
+- **The shell** is the zone mounted at `/` (no other flag). Exactly one per workspace. It owns the root layout, sign-in, `proxy.ts` and every route no other zone owns.
+- **A mount is one URL segment** (`/blog`: lowercase letters, digits, `-`). Every route of a zone lives under it: the files are under `app/blog/…`, never at `app/page.tsx` of the zone. Two zones on one mount are refused. A URL at the root that a zone serves is an alias: `aliases: [{ source: "/post/:id", destination: "/blog/:id" }]`.
+- **Declaring a zone: one object.**
+  ```js
+  // next.config.mjs
+  import { zoneConfig } from "@runsnip/next-zones/config";
+  export default zoneConfig({ mount: "/blog", aliases: [], transpilePackages: ["shared"] });
+  ```
+  `zoneConfig` takes out its own keys (`mount`, `aliases`, `livePull`, `endpoints`, `mode`, `metrics`) and passes every other key to Next unchanged. A Next config that is a function of the phase comes second: `zoneConfig({ mount: "/blog" }, (phase) => ({ … }))`; Next keys left in the first object are kept; the function's result wins on a key both set. The older form `zoneConfig({ mount }, { …nextConfig })` is still read the same way. `endpoints`, `mode` and `metrics` are the shell's only.
+- **What a zone may not do** (Zones refuses it at install, with the reason): its own `proxy.ts`, an `instrumentation-client` file, the edge runtime and Pages Router routes (today; planned), routes outside its mount or aliases, files at the root of `public/` (put them under `public/<mount>/…`), and `basePath`, `i18n`, `trailingSlash`, `assetPrefix`, `skipTrailingSlashRedirect`, `cacheComponents`, `partialPrefetching` different from the shell's, or an `images` key the zone sets that differs from the shell's (a zone with no `images` config fits any shell; zone-level `images` is planned). Every zone uses the shell's Next, React and react-dom versions.
+- **Build options are next-zones' to set.** Only in `next-zones build`, `zoneConfig` turns Turbopack's scope hoisting, unused-export and unused-import removal off (`experimental.turbopackScopeHoisting`, `turbopackRemoveUnusedExports`, `turbopackRemoveUnusedImports`: `false`) and pins the project root (`turbopack.root`). Leave them unset (setting them to `false` is harmless; `turbopack.root`/`outputFileTracingRoot` may be set if the shell and every zone share that root): a config that sets any of the three otherwise is refused in a build for Zones. Zones refuses an image built without them.
+- **Building** (in the workspace's folder):
+  - `next-zones build`: with the shell's `mode: "zones"` (the default), the shell as an app plus every other zone as a *zone image* in `.zones-store/<zone>/<version>/` (with `--pack`, a `.tgz` in `.zones-images/`), and `zones.json` pinning the versions; with `mode: "single"`, every zone linked into one standard Next app (no Zones at run time).
+  - `next-zones build blog`: only that zone's image, to release it alone.
+  - An image's version is the `version` in the zone's `package.json` (`--version` overrides). Images are immutable: bump the version to rebuild.
+- **Running:** `next-zones start` (what `build` made), `next-zones serve --shell <dir> --store <dir>`, or from code `createZones({ shell, store })` from `@runsnip/next-zones/zones`, then `zones.listen(port)`. One Zones per process, created before anything requires Next.
+- **Releasing a zone while it serves:** `next-zones install blog 1.4.0 --url http://127.0.0.1:3000`, or `zones.install("blog", "1.4.0")`. The same command rolls back to an earlier version still in the store. `install`, `pull --url` and `prune --url` talk to Zones' admin URLs, so the shell must declare `endpoints: { admin: true }` (else 404).
+- **A zone image enters a store only by a pull from a source**, never by an upload: a folder, a URL template (`https://host/{zone}/{version}.tgz`, `.tgz` or `.zip`, resumed on a dropped connection) or service-connector. `next-zones pull` pulls on the server side. A ping to a running Zones (`next-zones pull … --url`, or installing a version the store lacks) pulls only a zone declaring `livePull: true`; for any other zone, run `next-zones pull <zone> <version> --store <dir> --source …` on the server (safe beside a running Zones), then `install --url`. Old images are pruned (`--keep 2` by default).
+- **Zones' own URLs** (`/_next-zones/…`) exist only when the shell declares them: `endpoints: { events, health, admin }`. `events` and `health` are public (health's details go to an admin only); `admin` URLs need `Authorization: Bearer <NEXT_ZONES_ADMIN_TOKEN>`, or a request from the same machine when no token is set.
+- **Open tabs follow a new version** when the shell renders `<ZoneUpdates />` from `@runsnip/next-zones/client` and declares `endpoints: { events: true }`.
+- **Metrics:** the shell's `metrics: true` opens one store for the process, read as Prometheus text at `/_next-zones/metrics` by an admin. `metrics: true` alone opens that URL: no `endpoints` declaration is needed. A zone's code measures with `counter`, `gauge`, `histogram` and `time` from `@runsnip/next-zones/metrics`; with metrics off they do nothing.
+- **Developing:** `next-zones dev <zones dir>` runs every zone in one `next dev`, with HMR and soft navigation. `next-zones doctor <dir>` checks a workspace and says what to fix.
+- **Entry points:** `@runsnip/next-zones/config` (`zoneConfig`, `readZone`), `/client` (`ZoneUpdates`), `/zones` (`createZones`), `/build`, `/sources` (`fromDirectory`, `fromHttp`, `fromConnector`, `packZoneImage`), `/metrics`, `/tsconfig/zone.json`; the `next-zones` command.
+
+The documentation follows, page by page.
+
+---
+
+<!-- docs/README.md -->
+
+# next-zones
+
+**Zones for Next.js.** Build each part of a product as its own Next app, a *zone*, with its own version. Serve them as
+one app: one origin, soft navigation between zones, one React. A new version of a zone can be loaded into the running
+server without a restart.
+
+> **Status: pre-release.** It targets Next.js **16.4.0** and **16.3.8** (and 16.3.6, 16.3.7), App Router, production server.
+> - **Available:**
+>   - the zone declaration (`zoneConfig`);
+>   - the CLI: `init`, `add`, `check`, `doctor`, `dev`, `build`, `start`, `serve`, `install`, `pack`, `pull`, `prune`,
+>     `watch`;
+>   - Zones (`createZones`), which installs and swaps zones at run time;
+>   - one combined build of every zone (`mode: "single"`, the composer);
+>   - `<ZoneUpdates />`;
+>   - metrics: Zones' own and any zone's, as Prometheus text (`@runsnip/next-zones/metrics`).
+
+## Why
+
+Next.js has [Multi-Zones](https://nextjs.org/docs/app/guides/multi-zones):
+- every zone is a separate server;
+- moving between zones reloads the page and drops client state.
+
+next-zones keeps the separation (each zone builds, versions and deploys on its own) without those costs:
+
+| | Next Multi-Zones | next-zones |
+|---|---|---|
+| Moving between zones | hard navigation | **soft** `<Link>` navigation; client state kept |
+| Servers | one per zone | **one** for all zones |
+| A module shared by zones | loaded once per zone | loaded **once** |
+| Releasing a zone | redeploy its server | **install it live**, roll back in milliseconds |
+
+## Pages
+
+1. [Concepts](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/concepts.md): zones, the shell, mounts, aliases, versions
+2. [Getting started](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/getting-started.md)
+3. [Configuration: `zoneConfig`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/configuration.md)
+4. [CLI](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/cli.md): every command
+5. [Root URLs: aliases](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/aliases.md)
+6. [Routing rules: a zone's headers, redirects and rewrites](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/routing-rules.md)
+7. [Instrumentation](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/instrumentation.md)
+8. [Assets: fonts, images, public files](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/assets.md)
+9. [Live updates and requirements](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/updates.md)
+10. [Zones: live installs](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md)
+11. [Metrics](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/metrics.md)
+12. [What is supported](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/support.md)
+
+## For assistants
+
+The package ships `llms.txt` (the essentials) and `llms-full.txt` (every page above in one file), and a skill for
+coding assistants, `skills/next-zones/SKILL.md`: copy its folder into a project's skills folder (for Claude Code,
+`.claude/skills/`) so an assistant reads those files before it answers.
+
+## License
+
+Apache-2.0.
+
+---
+
+<!-- docs/concepts.md -->
+
+# Concepts
+
+## Zone
+
+A zone is a normal Next.js app (App Router), so it builds with `next build` and runs alone with `next start`. It
+declares itself in its `next.config` with [`zoneConfig`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/configuration.md). A zone never needs next-zones to run:
+- **On its own**, it is just a Next app.
+- **Together with other zones**, it is served by Zones, or built with them into one Next app (the composer).
+
+## The shell
+
+The shell is the zone mounted at `/`. There is no special flag: it is simply the owner of `/`. It holds what every
+page shares:
+- the root layout;
+- sign-in and the proxy (`proxy.ts`);
+- global instrumentation;
+- every route that is not another zone's.
+
+A set of zones has **exactly one** shell.
+
+## Mount
+
+Every zone other than the shell owns one URL segment, its *mount*, such as `/blog`. All of its routes live under it:
+`/blog`, `/blog/[id]`, `/blog/settings`… A mount has one owner. Two zones on the same mount are refused, and so is a
+zone on a segment the shell already serves.
+
+## Alias
+
+A zone can also serve a URL **at the root**, outside its mount, such as `/post/42` for its page `/blog/42`. That is an
+[alias](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/aliases.md): the page still lives under the mount, and the address bar shows the root URL.
+
+## Version
+
+A version of a zone is **a build**, not a copy of its source. Zone images are kept in a *store* (one folder per zone
+and version). Zones can switch between them, forwards or back, while the server runs.
+
+## The contract between zones
+
+Zones served together must share:
+- **one `node_modules`:** the same Next, the same React, the same layout (a monorepo workspace does this);
+- **the same root layout output:** in practice, every zone renders the same root layout component from a shared
+  package;
+- **the same `basePath`, `i18n`, `trailingSlash`, `assetPrefix`, `skipTrailingSlashRedirect`, `cacheComponents`,
+  `partialPrefetching`** (Zones refuses a zone that differs, and names the key); and **no `images` key of a zone's own
+  that differs from the shell's** (a zone with no `images` config fits any shell).
+
+**Shared packages may differ in version between zones.**
+- Modules that are the same in two zones are loaded once and shared.
+- A module that differs (another version of a shared component, or anything that imports it) runs in its own version
+  in each zone, side by side in the same page.
+- **Mind the remount.** A shared component that differs between two zones is two different components to React, so it
+  mounts again when the user moves between them. Keep the root layout and providers on the same version in every zone
+  to keep their state across zones.
+
+`zoneConfig` sets the build options next-zones needs (for example, Turbopack scope hoisting off, so a module shared
+by zones loads once).
+
+---
+
+<!-- docs/getting-started.md -->
+
+# Getting started
+
+> Requires Next.js 16.3.6, 16.3.7, 16.3.8 or 16.4.0, App Router, and Node.js 24 or later.
+
+## The quick way
+
+```sh
+npx @runsnip/next-zones init my-app blog shop     # a workspace: shared/, shell/, blog/, shop/, installed
+cd my-app
+npm run dev                                       # every zone on one next dev, with HMR: http://localhost:3000
+npm run doctor                                    # checks the workspace for Zones and for dev
+npx next-zones add docs                           # one more zone, at /docs
+```
+
+`init` uses the package manager that runs it (npm, yarn, pnpm or bun) and never overwrites a file. Every tsconfig
+extends `@runsnip/next-zones/tsconfig/zone.json`, and each zone keeps its own `@/*` → `./src/*`. The steps below are
+what it sets up, for a workspace made by hand.
+
+## 1. A workspace of zones
+
+One workspace (npm, yarn or pnpm), so every zone shares one `node_modules`:
+
+```
+my-app/
+  package.json        workspaces: ["shared", "shell", "blog", "shop"]
+  shared/             a package: the root layout, shared UI
+  shell/              the zone mounted at "/"
+  blog/               the zone mounted at "/blog"
+  shop/               the zone mounted at "/shop"
+```
+
+```json
+{
+  "private": true,
+  "workspaces": ["shared", "shell", "blog", "shop"],
+  "dependencies": { "@runsnip/next-zones": "0.x" }
+}
+```
+
+## 2. Declare each zone
+
+Each zone's `next.config.mjs` (or `.ts`):
+
+```js
+// shell/next.config.mjs
+import { zoneConfig } from "@runsnip/next-zones/config";
+
+export default zoneConfig({
+  mount: "/",
+  endpoints: { events: true, health: true, admin: true },   // Zones' own URLs, under /_next-zones (see below)
+  transpilePackages: ["shared"],
+});
+```
+
+`endpoints` is the shell's only. `events` feeds [`<ZoneUpdates />`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/updates.md), `health` answers a supervisor, and
+`admin` is what `next-zones install`, `pull --url` and `prune --url` talk to: without it they get a 404. See
+[endpoints](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#endpoints).
+
+```js
+// blog/next.config.mjs
+import { zoneConfig } from "@runsnip/next-zones/config";
+
+export default zoneConfig({
+  mount: "/blog",
+  transpilePackages: ["shared"],
+});
+```
+
+Every route of `blog` lives under `blog/app/blog/…`. At the top of `blog/app/` there may also be the root files Next
+needs when the zone runs alone (`layout`, `not-found`, `global-error`, `global-not-found`, `error`, `loading`,
+`template`, `default`, and CSS files); on Zones the shell's are used.
+
+## 3. Share the root layout
+
+Every zone renders the same root layout, so a page looks the same however it is reached:
+
+```tsx
+// shared/root-layout.tsx
+import Link from "next/link";
+
+export function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <nav><Link href="/">Home</Link> <Link href="/blog">Blog</Link> <Link href="/shop">Shop</Link></nav>
+        <main>{children}</main>
+      </body>
+    </html>
+  );
+}
+```
+
+```tsx
+// blog/app/layout.tsx (the same in every zone)
+import { RootLayout } from "shared/root-layout";
+export default RootLayout;
+```
+
+## 4. Follow new versions in open tabs
+
+In the shell's root layout, render [`<ZoneUpdates />`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/updates.md) once. Open tabs then pick up a newly installed
+zone image on their next navigation.
+
+## 5. Check the workspace
+
+```sh
+npx next-zones check .
+```
+
+```
+✓ /            shell
+✓ /blog        blog
+✓ /shop        shop
+```
+
+It fails if two zones claim one mount, if no zone owns `/`, or if an alias collides. Run it before every build.
+
+## 6. Build and run
+
+Give each zone a `version` in its `package.json`, then:
+
+```sh
+next-zones build          # the shell as an app, blog and shop as images, zones.json pinning their versions
+next-zones start          # Zones on port 3000: the shell, with blog and shop installed
+```
+
+- **Releasing a zone** is bumping its version, building its image, and installing it on the running Zones:
+  `next-zones build blog`, then `next-zones install blog 1.1.0` (it needs the shell's `endpoints: { admin: true }`).
+  See [build and start](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/cli.md#build-and-start).
+- **Each zone still runs on its own** with `next build` and `next start`.
+- **One Next app instead:** declare `mode: "single"` in the shell's `zoneConfig`; `next-zones build` then builds the
+  workspace as one app, and `next-zones start` runs it with `next start`. No images, no live installs.
+
+---
+
+<!-- docs/configuration.md -->
+
+# Configuration: `zoneConfig`
+
+```ts
+import { zoneConfig } from "@runsnip/next-zones/config";
+
+export default zoneConfig({ ...zone, ...nextConfig });     // one object
+export default zoneConfig(zone, (phase) => nextConfig);  // a Next config that is a function of the phase
+```
+
+One object holds both: `zoneConfig` takes out the zone's keys below and passes every other key to Next. A Next config
+that is a function of the phase comes second, after the zone's keys, so the declaration is known without calling it.
+`zoneConfig(zone, nextConfigObject)` is read too. In both two-argument forms, Next keys left in the first object are
+kept, and the second wins on a key both set.
+
+## `zone`
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `mount` | `string` | yes | `"/"` for the shell, otherwise one URL segment such as `"/blog"` (lowercase letters, digits, `-`) |
+| `aliases` | `{ source: string; destination: string }[]` | no | URLs at the root that this zone serves. See [aliases](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/aliases.md) |
+| `endpoints` | `{ base?, events?, health?, admin? }` | no (the shell only) | The URLs Zones serves of its own, under `base` (`"/_next-zones"` by default); none unless declared. See [endpoints](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#endpoints) |
+| `mode` | `"zones"` \| `"single"` | no (the shell only), `"zones"` | How the workspace is served. `"zones"`: the shell is built as an app and every other zone as an [image](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#zone-images), and Zones installs images while it runs. `"single"`: every zone is linked into one Next app, run by `next start`, with no live installs. See [build and start](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/cli.md#build-and-start). `output` and Next's other options stay Next's keys, in the same object |
+| `metrics` | `boolean` | no (the shell only), `false` | Opens one metrics store for the whole Zones process: requests by zone and version, installs, pulls, memory, and what a zone's code writes with `@runsnip/next-zones/metrics`; served as Prometheus text at `<base>/metrics` to an admin. Off, the metrics functions do nothing. See [metrics](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/metrics.md) |
+| `livePull` | `boolean` | no, `false` | Whether a ping (an admin request to Zones' `<base>/images/<zone>/<version>/pull` or `/install`) may make Zones pull this zone's images from its sources. Recorded in each zone image's `zone.json`; read from the zone's latest image before anything is fetched. Without it, the zone's images are pulled on the server side only (`next-zones pull`, a deploy step). Images already in the store install either way. See [live pulls](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#live-pulls) |
+
+An invalid declaration throws as soon as `next.config` is loaded, for example: `mount must be "/" (the shell) or one
+URL segment like "/blog"`.
+
+## `nextConfig`
+
+The zone's own Next config:
+- every key of the object that is not the zone's;
+- or a function of the phase, `(phase, { defaultConfig }) => config`, which may be async, as the second argument: what
+  it returns is laid over the first object's Next keys, key by key at the top level.
+
+`zoneConfig` returns it with the build options below, the zone declaration (attached under a symbol that Next
+ignores and next-zones reads back), and, when the zone runs alone, its aliases as rewrites. Everything else in your
+config is passed through unchanged.
+
+## Next's options are yours
+
+`zoneConfig` passes the zone's Next config through as it is, with one exception: in a build made by `next-zones build`,
+it fills in the [build options for Zones](#build-options-for-zones) below, and nothing else. `output`, `images`,
+`experimental` and the rest mean what they mean in Next, in every mode. A plain `next build` or `next dev` gets the
+config untouched.
+
+## Build options for Zones
+
+Zones runs zones that were built separately, sharing one instance of each module they have in common. That needs
+three Turbopack options off in the builds Zones runs (the shell and every zone image). `zoneConfig` fills them in
+**only in `next-zones build`** (the shell and every zone image, in both modes: `"single"` links the same images), and
+**only where your config leaves them unset**. Anywhere else (a zone built alone with `next build`, `next-zones dev`)
+nothing is filled in.
+
+If your config sets one of them otherwise, a build for Zones stops with an error naming it, rather than overriding it.
+Setting them to `false` yourself is allowed, and changes nothing. `turbopack.root` and `outputFileTracingRoot` you may
+set too: what counts is that the shell and every zone are built from one root.
+Zones refuses a shell or a zone image that was built without them, and says to build it with `next-zones build`.
+
+| Option | In a build for Zones | Why | Cost (measured) |
+|---|---|---|---|
+| `experimental.turbopackScopeHoisting` | `false` | Hoisting merges modules into one factory that writes other modules' exports. A module shared by several builds is loaded once, so no build may write into it | Server JS of the test shell +16% (520 → 604 KB); client JS unchanged |
+| `experimental.turbopackRemoveUnusedExports` | `false` | Turbopack drops the exports a build does not use. A library used by the shell and a zone then differs between their builds: the shell's copy has only what the shell uses. They load as two modules, so a context it creates exists twice, and a zone's hook does not see the shell's provider (found with `@tanstack/react-query`: "No QueryClient set") | Two real apps: client JS +1.9% and +3.4%, server JS +8.6% and +4.4% |
+| `experimental.turbopackRemoveUnusedImports` | `false` | Turbopack refuses to build with it on while unused exports are kept | Included above |
+
+### The project root
+
+Turbopack names every module by its path from the project root, and its module ids come from that name, so the shell
+and every zone image must be built from one root to share modules. Next infers the root from the topmost lockfile
+above the app: a lockfile added in a parent folder would move it, and rename every module of the builds after it. A
+build for Zones therefore pins it: `turbopack.root` and `outputFileTracingRoot` are set, when your config leaves them
+unset, to `NEXT_ZONES_ROOT`, or else to the nearest folder whose `node_modules` holds `next` (widened to hold that
+`node_modules` where it really is, when it is a link). Zones refuses a zone image built from another root than the
+shell's, and says so.
+
+Mode `"single"` links the same zone images into one app, where a module several builds use is also loaded once, so it
+needs them too.
+
+The cost is the size in the last column, and nothing else. Getting it back means sharing a module by what it exports,
+not by its whole code (debt D8 in the README). That was tried and measured: splitting a shared library into a
+fragment per export, or pinning only the modules that hold state, came back larger or not exact. What stops it is
+Turbopack itself: unused-export removal is one switch for the whole build, with no way to keep one module's exports
+whole. So the options stay off.
+
+## Running a zone alone
+
+A zone is a normal Next app: it builds and runs on its own (`next build`, `next start`, `next dev`), and can be
+deployed on its own domain. Alone, it serves its own routes, and `zoneConfig` adds its aliases to its own rewrites.
+A build for Zones (`next-zones build`) leaves them out, because Zones serves them.
+
+Links to the other apps are then links to another site: point them at where those apps live.
+
+## Example
+
+```js
+import { zoneConfig } from "@runsnip/next-zones/config";
+
+export default zoneConfig({
+  mount: "/blog",
+  aliases: [{ source: "/post/:id", destination: "/blog/:id" }],
+  transpilePackages: ["shared"],
+  reactStrictMode: true,
+});
+```
+
+## `readZone(dir)`
+
+```ts
+import { readZone } from "@runsnip/next-zones/config";
+
+const zone = await readZone("./blog");   // { mount: "/blog", aliases: [...] }, or null if not a zone
+```
+
+It loads the app's `next.config.mjs`, `.js`, `.ts` or `.mts`, and returns its declaration. Tools use it: the CLI,
+build scripts, Zones.
+
+---
+
+<!-- docs/cli.md -->
+
+# CLI
+
+| Command | What it does |
+|---|---|
+| `next-zones init <dir> [zone…] [--no-install]` | A new workspace: a shared package, the shell and its zones, installed ([getting started](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/getting-started.md#the-quick-way)) |
+| `next-zones add <zone> [--mount /<segment>]` | One more zone in the workspace of the current folder |
+| `next-zones check <dir> [more dirs…]` | Checks the zones' declarations: mounts, the shell, aliases (below) |
+| `next-zones doctor <dir> [more dirs…] [--store <dir>] [--url <zones url>] [--fast]` | Checks a workspace from source for everything Zones and `dev` need, with what to do (below) |
+| `next-zones build [--dir .] [--version <v>] [--store <dir>] [--pack] [--out <dir>]` | Builds the workspace as its shell declares ([build and start](#build-and-start)): with `mode: "zones"`, the shell as an app, every zone as an image, and `zones.json` pinning the versions built |
+| `next-zones build <zone>… [--dir .] [--version <v>] [--store <dir>] [--pack] [--out <dir>]` | Builds only these zones' images, to release what changed. The shell is not built |
+| `next-zones start [--dir .] [--store <dir>] [--source <url template \| dir>]… [serve's options]` | Runs what `build` made: Zones, the shell, the pinned images |
+| `next-zones serve --shell <dir> [--store <dir>] [--cache <dir>] [--pins zones.json] [--policy zones.config.json] [--source <url template \| dir>]… [--connector <origin> --connector-owner <owner>] [--keep 2] [--no-prune] [--min-free <MB>] [--port 3000] [--host 0.0.0.0]` | Runs the [Zones](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md), installing the pinned versions of `zones.json` (if present) under the store's `state.json`. `--source` (repeatable): where it pulls zone images from. `--keep`: the rollback window [pruning](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#pruning) keeps; `--no-prune` turns it off. `--min-free`: what a pull leaves free on the disk (1024 MB by default) |
+| `next-zones pack <zone image dir> [--out <file.tgz \| file.zip>]` | Packs a zone image into one `.tgz`, the form a source serves (see [zone images](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#zone-images)) |
+| `next-zones pull <zone> <version> --store <dir> (--source <url template \| dir>… \| --connector <origin> --connector-owner <owner>) [--min-free <MB>]` | Pulls a zone image into a store, on the server side (any zone): streamed, checked, then moved in. A deploy step |
+| `next-zones pull <zone> <version> --url <zones url> [--base /_next-zones]` | Pings a running Zones to pull it from its sources: only a zone that allows [live pulls](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#live-pulls) |
+| `next-zones prune --store <dir> [--keep 2] [--pins zones.json] [--cache <dir>] [--dry-run]` | [Prunes](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#pruning) a store no Zones runs on (refused while one does) |
+| `next-zones prune --url <zones url> [--base /_next-zones] [--keep 2] [--dry-run]` | Asks a running Zones to prune its store |
+| `next-zones install <zone> <version> [--url http://127.0.0.1:3000] [--base /_next-zones]` | Asks a running Zones service to install, swap to or roll back to a version |
+| `next-zones dev <zones dir> [--port 3000]` | Develops every zone at once: one `next dev`, with HMR and soft navigation (below) |
+| `next-zones watch <zones dir> <zone> [more zones…] [--url http://127.0.0.1:3000] [--base /_next-zones] [--store <dir>]` | Rebuilds zones on every change and installs them on a running Zones service (below) |
+
+`start`, `serve`, `install`, `pull`, `prune` and `watch` read the admin token from `NEXT_ZONES_ADMIN_TOKEN`. When the
+server has a token, a command must send the same one, even from the same machine: the loopback rule holds only with
+no token configured.
+
+- **Sources** (`serve`, `start`, `pull`): `--source`, repeatable, is an `http(s)` URL template with `{zone}` and
+  `{version}` (`https://images.example.com/{zone}/{version}.tgz`), or a folder. `--connector <origin>
+  --connector-owner <owner>` adds a service-connector source, its token read from `NEXT_ZONES_CONNECTOR_TOKEN` (never
+  from the command line). `zones.js` reads `NEXT_ZONES_SOURCES`: URL templates and folders, separated by commas; and a connector from
+  `NEXT_ZONES_CONNECTOR`, `NEXT_ZONES_CONNECTOR_OWNER` and `NEXT_ZONES_CONNECTOR_TOKEN`.
+- **`--shell <dir>`** (`serve`) is the shell's folder after `next-zones build`: its `next.config` and its `.next`. On a
+  server, deploy that folder (or, with the shell's `output: "standalone"`, the standalone folder `build` makes, run
+  with `node zones.js`); CI that builds only zone images leaves the shell's deploy as it is.
+- **Publishing an image** (the `.tgz` of `build --pack`) is yours to do with any tool that puts a file where a source
+  reads it (an object store behind the URL template, a folder): next-zones never uploads, and Zones accepts no upload.
+- **Versions** are any of letters, digits, `.`, `_` and `-` (`12`, `1.4.0`, `2026-10-09.1`). A command always names
+  the version it means.
+- **`--format zip`** (`build --pack`): packs each image as a `.zip` instead of a `.tgz`.
+- **`next-zones pull --store` beside a running Zones** is safe: the image is written to a folder of its own and moved in
+  by one rename, and nothing active changes. The running Zones installs it when asked (`install --url`). `prune
+  --store`, which deletes, is refused while a Zones runs on the store (its `zones.pid`, for a process that is still
+  alive: a pid left by a crash does not block). `pull --store` prunes nothing (short of disk room, it is
+  refused): a running Zones prunes after its own pulls and installs, and at boot.
+- **Pins and the store's state.** `zones.json` (`--pins`) names the versions a build made; the store's `state.json`
+  records what a running Zones installed since (live installs and rollbacks). At start, `state.json` wins, unless
+  `zones.json` was written after it (its file time is later than `state.json`'s `updatedAt`): then a new build's pins
+  win. `createZones({ pins })` given as an object has no file time: pass `pinsAt` (milliseconds) with it to say when
+  they were made, or `state.json` wins. Make it the time the pins were written (at deploy), never `Date.now()` at start:
+  that would undo every live install at each restart.
+- **The instrumentation policy** (`zones.config.json`, see [instrumentation](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/instrumentation.md#the-policy)) is read
+  by `start` from the workspace's folder, by `serve` from the current folder (`--policy` names another file), and by
+  `zones.js` from its own folder (`build` copies it there), all when they start. Mode `"single"` reads it when it
+  builds, into the one app's `instrumentation` file. `POST <base>/policy` replaces it in the running Zones
+  only: the file is not written.
+
+## Build and start
+
+Like `next build` and `next start`, for a workspace of zones (run in the workspace's folder, or with `--dir`). The
+shell declares what the workspace builds to, with `zoneConfig({ mount: "/", mode })`:
+
+| | Command | Output | Then |
+|---|---|---|---|
+| **The workspace**, `mode: "zones"` (default) | `next-zones build` | The shell built as an app (`shell/.next`); every other zone as an [image](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#zone-images) in `.zones-store/<zone>/<version>/`, or packed into `.zones-images/<zone>/<version>.tgz` with `--pack`; `zones.json` pinning the versions built | `next-zones start` |
+| **One zone, or a few** | `next-zones build blog` | `blog`'s image only (`--pack`: a `.tgz`). The shell is not built | A running Zones installs it: `next-zones install blog 1.4.0`, or [pulls](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#how-an-image-enters-the-store-a-pull) it from where you published the `.tgz` |
+| **One app**, `mode: "single"` | `next-zones build` | Every zone built once, as on Zones, then each zone's image linked into one standard Next app, following the shell's Next `output` (below). No `zones.json`, no Zones at run time | `next-zones start`: `next start` of that app; see the outputs below |
+
+- **An image's version** is the `version` in the zone's `package.json`; `--version` gives one to every zone built.
+- **Images are immutable.** A version already built is kept by `next-zones build` (and said so), and refused by
+  `next-zones build <zone>`: bump the zone's version.
+- **One app** (`mode: "single"`) is linked from the same zone images Zones runs: one zone format, built once. The
+  shell's build and every image are linked into one `.next` (`link-app.mjs`): each zone's server files, routes under
+  its mount, aliases, headers, redirects and rewrites, prerendered pages, server actions, fonts, public files, its own
+  packages, and instrumentation as on Zones. Each zone keeps its own build, so its own `@/*` and its own `tsconfig`
+  hold as they were built. Nothing is rebuilt: a zone changed is built again alone, then linked.
+- **Next's `output`, in mode `"single"`,** is each zone's own Next config's, and the link follows the shell's:
+  - none: `.zones-app/.next`, served by `next start` (`next-zones start` runs it);
+  - `"standalone"`: the zones linked into the shell's standalone folder (`shell/.next/standalone/…/server.js`), with
+    `.next/static` and `public/` copied in, as Next's docs say a deploy must, and each zone's server files traced
+    with Next's own `@vercel/nft`. The folder is the whole deploy: copied anywhere, its `server.js` serves every zone
+    (`singlestandalone.mjs` runs it from outside the workspace). `next-zones start` runs it;
+  - `"export"`: a static site in `.zones-export`, every zone's export linked into the shell's; links between zones
+    stay soft (`singleexport.mjs`). `next-zones start` says where it is, as `next start` does not serve an export.
+    Rewrites, redirects, headers and aliases do not apply to an export, as in Next.
+- **Next's `output: "standalone"`, in mode `"zones"`:**
+  - **The shell's config says it:** `next-zones build` makes the shell's standalone folder
+    (`shell/.next/standalone/…`) the whole deploy. It adds:
+    - what Next leaves to the deploy (`.next/static`, `public/`);
+    - next-zones, and the files of Next that Zones uses, traced with Next's own `@vercel/nft`;
+    - the shell's declaration;
+    - the images built, and `zones.json`;
+    - `zones.js`, which starts Zones the way Next's `server.js` starts Next.
+
+    Copied anywhere, `node zones.js` serves every zone (`PORT`, `HOSTNAME`, `NEXT_ZONES_STORE`,
+    `NEXT_ZONES_ADMIN_TOKEN`, `NEXT_ZONES_SOURCES`, `NEXT_ZONES_CONNECTOR`, `NEXT_ZONES_CONNECTOR_OWNER`,
+    `NEXT_ZONES_CONNECTOR_TOKEN`, see **Sources** above). `next-zones start` runs it. Pruning keeps 2 and
+    pulls leave 1024 MB free, as `serve`'s defaults.
+  - **A zone's config says it:** its image carries the packages its server traces need, Next and React aside, so it
+    runs where the workspace's `node_modules` is not. Zones resolves a zone's packages from the shell first (one copy
+    of each), then from the image.
+- **Next's `output: "export"`, in mode `"zones"`:** the shell's config and every zone's say it (each zone is exported on
+  its own; next-zones never sets it). `next-zones build` exports the shell and each zone as an image (which keeps its
+  `out/`), then links them into one static site, `.zones-export/`, for any static host. Linking does once what Zones
+  does at install: clashing client module ids are remapped, each zone's main chunk is written, and its pages carry the
+  shell's build id, so links between zones stay soft. A zone whose image has no export stops the build with the reason.
+  Rebuilding one zone and linking again leaves the others as they were built.
+- **`next-zones start`** runs Zones with the shell, installs the versions `zones.json` pins (newer pins replace the
+  versions a previous run left live), and pulls a pinned version the store lacks from `.zones-images` or `--source`.
+  `.zones-images` stays a source while it runs, so `next-zones build <zone> --pack` then a ping installs the new one.
+
+**About `build`.** It builds each zone where it is, as `next build` would (Turbopack's cache is reused from one version
+to the next). Two versions may give one id to different modules; Zones tells them apart by what each module is, its
+dependencies included: an open tab runs the new version's client code after a swap, and the server never hands one
+version another's module. The store defaults to `NEXT_ZONES_STORE`, else `<zones dir>/.zones-store`.
+
+## `next-zones check`
+
+```sh
+next-zones check <dir> [more dirs…]
+```
+
+It reads every sub-folder of each `<dir>` whose `next.config` uses `zoneConfig`, and checks the set as a whole.
+
+| Check | Error |
+|---|---|
+| Each mount is `/` or one segment | `blog: mount must be "/" or one URL segment like "/blog"` |
+| A mount has one owner | `/ is claimed by 2 zones: a, b` |
+| Exactly one shell | `no zone owns "/": exactly one zone, the shell, must declare "mount": "/"` |
+| An alias does not land on a mount | `shop: alias /blog/:x lands on the mount of blog` |
+| Two zones do not share an alias segment | `aliases under /post are claimed by blog, shop` |
+
+It exits with `0` when everything holds and `1` otherwise, so it can gate a build:
+
+```json
+{ "scripts": { "zones:check": "next-zones check .", "build": "npm run zones:check && npm run build --workspaces" } }
+```
+
+> With yarn 1, do not name the script `check`: `yarn check` is a built-in command.
+
+## `next-zones doctor`
+
+```sh
+next-zones doctor . --store .zones-store --url http://127.0.0.1:3000
+next-zones doctor . --fast            # without Next's and React's checks (lint, types)
+```
+
+It reads the workspace from source, before anything is built, and reports every finding with what to do. It exits
+with `1` on an error.
+- `✗` **an error:** Zones would refuse the zone at install, or `next-zones dev` would not run.
+- `!` **a warning:** it works, with a cost or a surprise.
+- `✓` **a check that holds.**
+
+| Check | Why |
+|---|---|
+| The declarations, as `check` | One shell, one owner per mount and alias segment |
+| One `next`, `react` and `react-dom` for every zone | Zones loads each once |
+| `basePath`, `i18n`, `trailingSlash`, `assetPrefix`, `skipTrailingSlashRedirect`, `cacheComponents`, `partialPrefetching` equal to the shell's | They shape every URL |
+| `images` equal to the shell's | The shell's image optimizer serves every zone |
+| A zone's `headers`, `redirects` and `rewrites` under its mount or aliases | Root rules belong to the shell |
+| No `proxy`/`middleware` or `instrumentation-client` in a zone | They would not run when the zone is reached from the shell |
+| A zone's `app/` holds its mount, plus root files used alone (`layout`, `not-found`, `global-error`, `global-not-found`, `error`, `loading`, `template`, `default`, CSS) | Routes outside the mount are refused |
+| No zone's mount or alias on a segment the shell's `app/` serves (route groups included) | A segment has one owner; refused at install |
+| No edge runtime in a zone | Not served by Zones yet |
+| No Pages Router routes in a zone (`pages/`, Next's `_app`, `_document`, `_error`, `404`, `500` aside) | Zones serves a zone's `app/` routes only; refused at install |
+| A zone's `public/` holds only `public/<mount>/` | Public files are served at the root, beside other zones' |
+| `env` keys with one value across zones (warning) | Composed by `dev`, a key has one value |
+| A path alias that differs between zones has the form `"prefix/*": ["folder/*"]` | The form `dev` gives each zone |
+| `.next/`, `node_modules/`, `.zones-dev/`, `.zones-store/`, `.zones-images/`, `.zones-cache/`, `.zones-app/`, `.zones-export/` ignored by git (errors); `next-env.d.ts`, `*.tsbuildinfo` (warnings) | Asked of git itself (`git check-ignore`), so any `.gitignore` in the repository, or a global one, counts |
+| **Next's and React's checks** (not with `--fast`): `eslint-config-next`'s rules on each zone's sources, or the zone's own ESLint config; then `next typegen` and `tsc --noEmit` | Neither Next nor React ships a doctor. These are their official checks: Next's plugin, React's hooks and compiler rules, and the type check `next build` runs. They run from the workspace's installs (`eslint` 9, `eslint-config-next`, `typescript`); nothing is downloaded |
+| With `--store`: `state.json` pins versions in the store, built with the shell's Next and React | Zones refuses them otherwise |
+| With `--url`: a Zones answers at that URL (a warning when it does not) | |
+
+## `next-zones dev`
+
+```sh
+next-zones dev . --port 3000          # then open http://localhost:3000
+```
+
+It composes the shell and every zone into one Next app, `<zones dir>/.zones-dev/`, and runs `next dev` on it:
+- **HMR everywhere:** in every zone, and in shared packages. An edit shows in under 0.1 s, and the page keeps its
+  state.
+- **Soft navigation between zones,** with one React, as on Zones.
+
+**What it writes.** Nothing is copied: the app is made of links to the zones' own files, and Next sees every edit.
+- `app/`: the shell's `app/`, and each zone's `app/<mount>/` under its mount, as real folders of links to files.
+  Next's route discovery does not enter linked folders.
+- `next.config.mjs`: the shell's config, with each zone's `transpilePackages`, `env`, `headers`, `redirects` and
+  `rewrites` added, and the zones' aliases as rewrites.
+- `postcss.config.mjs`: the shell's, with Tailwind scanning the zones dir.
+- `tsconfig.json`: the shell's, with the `paths` every zone agrees on.
+- **Each zone keeps its own path aliases.** Next reads one tsconfig per app, so an alias that zones point to different
+  folders (each zone's `@/*` → its own `src/`) is given to each zone's files by a loader rule instead.
+  `@/x` in a zone's file becomes the path to that zone's `src/x`.
+
+**What zones must agree on, composed:**
+- **A path alias that differs between zones** must have the form `"prefix/*": ["folder/*"]`, which is what `@/*` is.
+- **An `env` key has one value** across zones.
+- **The shell's root files serve everyone.** A zone's own root layout and root `not-found` serve it when it runs alone,
+  as on Zones.
+
+## `next-zones watch`
+
+```sh
+next-zones serve --shell shell --port 3000 &        # Zones, with the shell (its folder)
+next-zones watch . blog shop                         # production builds, installed on every change
+```
+
+Zones runs production builds, so this is the way to try a change exactly as it will be served. It builds each zone
+once, then watches the zones dir:
+- **A change inside a zone** rebuilds that zone.
+- **A change in a shared package** (any folder that is not a zone) rebuilds every zone it watches.
+- **Each build** is a version `dev-<time>`. It is installed on Zones at once, so an open tab with
+  [`<ZoneUpdates />`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/updates.md) refreshes.
+- **Old versions** are collected on Zones and removed from the store. The one before is kept, for a rollback.
+- **The shell is not rebuilt.** It is Zones' own build: rebuild it with `next-zones build` (never plain `next build`,
+  which leaves out the [build options](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/configuration.md#build-options-for-zones) Zones requires) and restart Zones.
+
+A zone build takes 6–7 s for a small zone, and installing it about 200 ms.
+
+---
+
+<!-- docs/aliases.md -->
+
+# Root URLs: aliases
+
+A zone's routes live under its mount, but sometimes a URL must sit at the root: a short share link, a public profile,
+a legacy address.
+
+```js
+export default zoneConfig({
+  mount: "/blog",
+  aliases: [{ source: "/post/:id", destination: "/blog/:id" }],
+});
+```
+
+- `source` is the root URL. It must start with a fixed segment (`/post/…`) and can use the same parameters as Next's
+  `rewrites` (`:id`, `:path*`).
+- `destination` is the zone's own route, and must be under its mount.
+
+## What the user sees
+
+- `/post/42` renders the zone's `/blog/42`.
+- The address bar keeps `/post/42`, and `<Link href="/post/42">` navigates softly.
+- The shell's `proxy.ts` runs first, so a sign-in gate on `/post/…` applies.
+
+## Rules
+
+An alias is refused if:
+- it points outside its zone's mount;
+- it lies inside its own mount (use the route itself);
+- its first segment is the shell's (for example `/about`), another zone's mount, or another zone's alias segment.
+
+When a zone image without the alias is installed, the alias stops resolving.
+
+> **Running a zone alone** (`next build`, `next start`, `next dev`): `zoneConfig` adds the aliases to the zone's own
+> rewrites, so the zone answers them alone too. A build for Zones (`next-zones build`) leaves them out: Zones
+> serves them.
+
+---
+
+<!-- docs/routing-rules.md -->
+
+# Routing rules: a zone's headers, redirects and rewrites
+
+A zone keeps its own `headers()`, `redirects()` and `rewrites()` in its `next.config`, as any Next app does. They apply
+when the zone runs alone and when it is served together with other zones.
+
+```js
+export default zoneConfig({
+  mount: "/blog",
+  async headers() {
+    return [{ source: "/blog/api/:path*", headers: [{ key: "x-zone", value: "blog" }] }];
+  },
+  async redirects() {
+    return [{ source: "/blog/old/:id", destination: "/blog/:id", permanent: true }];
+  },
+  async rewrites() {
+    return {
+      beforeFiles: [{ source: "/blog/b/:id", destination: "/blog/:id" }],
+      afterFiles: [{ source: "/blog/a/:id", destination: "/blog/:id" }],
+      fallback: [{ source: "/blog/f/:path*", destination: "/blog/docs/:path*" }],
+    };
+  },
+});
+```
+
+## What applies
+
+Everything Next supports in these rules:
+- parameters (`:id`, `:path*`);
+- `has` and `missing` conditions;
+- permanent (308) and temporary (307) redirects;
+- rewrites before files, after files and as a fallback.
+
+They keep Next's order: headers and redirects run before the shell's `proxy.ts`; rewrites run after it.
+
+Intercepting routes (`(.)photo`, `(..)photo`) work too, since Next turns them into rewrites.
+
+## Rules
+
+- **Every `source` must be under the zone's mount, or under one of its [aliases](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/aliases.md).** A rule anywhere else
+  would change URLs the zone does not own, so the zone is refused at install.
+- **A `destination` may point anywhere,** another zone's route included.
+- **When a new version of the zone is installed, its rules replace the old version's,** as one step with the rest of
+  the zone.
+
+---
+
+<!-- docs/instrumentation.md -->
+
+# Instrumentation
+
+Next runs one `instrumentation.ts` per server. With zones there is one server and several apps, so next-zones
+dispatches.
+
+| | `register()` | `onRequestError()` |
+|---|---|---|
+| The shell's | once, when the server starts | for errors on **every** route, any zone's included (unless the policy skips a zone) |
+| A zone's own | when that zone image is installed | for errors on **that zone's** routes only |
+
+A zone never sees another zone's errors.
+
+## The policy
+
+`zones.config.json`, in the workspace's folder (beside the zones' folders), read by `next-zones start`, `serve`,
+`zones.js` and mode `"single"` (see [the CLI](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/cli.md)); or `createZones({ policy })` with the same object:
+
+```json
+{
+  "instrumentation": {
+    "shell": { "skip": ["shop"] },
+    "own": { "blog": false }
+  }
+}
+```
+
+- **`shell.skip`:** zones whose errors do not go to the shell's `onRequestError`.
+- **`own`:** set a zone to `false` to turn off its own instrumentation. By default every zone's runs.
+
+## Things to know
+
+- **`register()` is process-wide.** All zones run in one Node process, so whatever a `register()` sets globally (an
+  OpenTelemetry tracer provider, `process.on` handlers) affects every zone. Keep global setup in the shell, and let a
+  zone's `register()` do only zone-scoped work.
+- **Swapping a version.** Next has no "unregister". If a zone exports `unregister()`, next-zones calls it on the
+  version being replaced, before the new version's `register()`.
+
+> The same in both modes: on [Zones](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md), and in mode `"single"`, where next-zones writes the one app's
+> `instrumentation` file to dispatch this way. A zone's `register()` runs when Zones installs its image, or, in one
+> app, when that app starts.
+
+---
+
+<!-- docs/assets.md -->
+
+# Assets: fonts, images, public files
+
+## Fonts
+
+`next/font` works in a zone as it does in any app: the font is preloaded, and its CSS comes with the zone's styles.
+
+```tsx
+import localFont from "next/font/local";
+const zoneFont = localFont({ src: "./fonts/my-font.woff2" });
+```
+
+## Images
+
+`next/image` works with the zone's own local images:
+- **imported images** (`import hero from "./hero.png"`);
+- **files from the zone's `public/`** (`src="/blog/logo.png"`).
+
+The image optimizer uses **the shell's** `images` settings: sizes, formats, remote patterns. Put remote patterns
+that a zone needs in the shell's config. A zone that sets no `images` config fits any shell. A key a zone sets of its own
+(not left at Next's default; set to Next's default, it counts as unset) and that differs from the shell's is refused at install today; zone-level image config is
+planned.
+
+## Public files
+
+A zone's `public/` files must live **under its mount**:
+
+```
+blog/public/blog/logo.png     → served at /blog/logo.png   ✓
+blog/public/favicon.ico       → refused: outside the zone's mount
+```
+
+The root (`/favicon.ico`, `/robots.txt`…) belongs to the shell. A public file takes precedence over a dynamic route
+at the same URL, as in Next.
+
+---
+
+<!-- docs/updates.md -->
+
+# Live updates and requirements
+
+## `<ZoneUpdates />`: open tabs follow a new version
+
+The shell declares the events endpoint (Zones serves no URL unless declared, see [endpoints](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#endpoints)):
+
+```js
+export default zoneConfig({ mount: "/", endpoints: { events: true } });
+```
+
+Then render it once, in the shell's root layout. With another `endpoints.base`, pass
+`<ZoneUpdates endpoint="<base>/events" />`:
+
+```tsx
+import { ZoneUpdates } from "@runsnip/next-zones/client";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        {children}
+        <ZoneUpdates />
+      </body>
+    </html>
+  );
+}
+```
+
+Importing `@runsnip/next-zones/client` in the shell also gives the shell's browser runtime every feature a zone's code
+may use. Each build's Turbopack runtime holds only what that build uses, and a document runs the shell's: a zone with a
+top-level await in a client module needs the runtime's async-module support there. Zones refuses a zone whose code uses
+something the shell's runtime lacks, and names it.
+
+When Zones installs a new version of any zone, it tells every open tab. The tab refreshes its router, so it drops
+the pages it had cached, and its next navigation shows the new version, its client code included. Nothing reloads, and
+client state is kept.
+
+Without it, a tab still gets new versions of dynamic pages at once. A static page it has already visited may keep its
+old version until the router's stale time (5 minutes by default) or a `router.refresh()`.
+
+When a zone runs alone, or the events endpoint is not declared, there is no event stream and `<ZoneUpdates />` does
+nothing.
+
+## Requirements
+
+- **Next.js 16.3.6, 16.3.7, 16.3.8 or 16.4.0, App Router** (see [supported Next versions](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#supported-next-versions)).
+- **Every zone is built with the same Next, React and react-dom as the server that runs them.** The build records
+  their versions, and a zone built with others is refused at install.
+- **One workspace.** The zones and the shell share one `node_modules`. A zone's dependencies, its
+  `serverExternalPackages` included, resolve from the shell's `node_modules` when it is served, wherever its build is
+  stored. A package the workspace did not hoist, in the zone's own `node_modules`, is bundled into its build:
+  `next-zones build` resolves it as the zone does. An external package (`serverExternalPackages`) is not bundled, so
+  it must be in the shell's `node_modules`.
+- **The same `basePath`, `i18n`, `trailingSlash`, `assetPrefix`, `skipTrailingSlashRedirect`, `cacheComponents`,
+  `partialPrefetching`** as the shell's, and no `images` key of its own that differs from the shell's.
+
+---
+
+<!-- docs/zones.md -->
+
+# Zones: live installs
+
+Zones is a Next production server that starts with the shell. It loads zone images from a **store** while it runs,
+with no restart.
+
+## Running it
+
+On one machine (development, or a server that builds), in the workspace's folder (see [build and start](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/cli.md#build-and-start)):
+
+```sh
+next-zones build                                            # the shell, every zone as an image, zones.json pins
+next-zones start --port 3000
+next-zones build blog && next-zones install blog 12         # a new version of one zone: install, swap or roll back, live
+```
+
+With images built elsewhere (CI), published to a source, and pulled by the server (see [zone images](#zone-images)):
+
+```sh
+# CI
+next-zones build blog --pack          # .zones-images/blog/<version>.tgz: upload it where the source points
+# the server
+next-zones serve --shell ./shell --store /srv/zones --source "https://images.example.com/{zone}/{version}.tgz"
+next-zones pull blog 12 --store /srv/zones --source "https://images.example.com/{zone}/{version}.tgz"   # on the server: into the store
+next-zones install blog 12 --url http://127.0.0.1:3000      # the running Zones installs it
+```
+
+`next-zones pull` runs beside a serving Zones: it writes a new folder of the store, and the running Zones reads it
+when asked to install. A zone that declares `livePull: true` may skip that step: `install --url` of a version the
+store lacks then asks the running Zones to pull it from its own sources first. Without `livePull`, that install is
+refused, and says the image must be pulled first.
+
+Or from code:
+
+```js
+const { createZones } = require("@runsnip/next-zones/zones");
+
+const zones = createZones({
+  shell: "./shell",                           // the shell's folder, after next-zones build
+  store: process.env.NEXT_ZONES_STORE,        // <store>/<zone>/<version>/, built with next-zones build
+  pins: { blog: "12", shop: "4" },             // installed at boot, under the store's state.json
+  adminToken: process.env.NEXT_ZONES_ADMIN_TOKEN,
+});
+await zones.listen(3000);
+await zones.install("blog", "13");
+```
+
+**Rules for the process:**
+- One Zones per process, created before anything else requires Next. It hooks Node's module loader and Next's internals.
+- `zones.handleRequest(req, res)` mounts it in a server of your own, after `await zones.prepare(port, hostname)`
+  (async: it readies Next and installs the pinned versions; `listen()` does both and listens). `port` and `hostname`
+  are where your server listens, which Next needs to know. `handleRequest` returns a promise, and answers every
+  request itself, a 404 included: catch its rejection to answer a 500.
+
+```js
+// server.mjs
+import http from "node:http";
+import { createZones } from "@runsnip/next-zones/zones";   // before anything imports Next
+const zones = createZones({ shell: "./shell", store: "/srv/zones", adminToken: process.env.NEXT_ZONES_ADMIN_TOKEN });
+await zones.prepare(3000, "0.0.0.0");
+http.createServer((req, res) => zones.handleRequest(req, res).catch(() => { res.statusCode = 500; res.end(); })).listen(3000, "0.0.0.0");
+```
+
+## The store
+
+- **`<store>/<zone>/<version>/`** holds what `next-zones build` wrote:
+  - the zone's `.next` output and its `public/`;
+  - `zone.json`:
+    - its name, version, mount and aliases;
+    - the Next and React it was built with;
+    - its **integrity**, a sha256 over every file of the build;
+    - **what Zones needs to install it** (routes, rules, actions, prerendered pages, config), read from the build
+      once, at build time.
+- **A build is checked before it is installed.** The first time Zones installs a stored build, it hashes it in a
+  worker thread and refuses it if it differs from the build that was stored: copied in part, or changed since.
+  Nothing changes on a refusal. A build is checked once per process.
+- **`zones.json`** (read by `next-zones serve`, or `createZones({ pins })`) pins the versions a deploy starts with:
+  `{ "zones": { "blog": "12", "shop": "4" } }`; `createZones({ pins })` takes the inner object, `{ blog: "12" }`. It is
+  read-only; installs since are kept in `state.json`.
+- **`<store>/state.json`** holds the active version of each zone, and the last installs of each (the rollback window
+  [pruning](#pruning) keeps).
+  - Zones writes it after every install (to a temporary file, then renamed).
+  - It reads it at boot, over the pins, so a restart keeps the versions that were live; unless the pins are newer
+    (a `zones.json` written after `state.json`'s `updatedAt`, or `createZones({ pins, pinsAt })` with a later
+    `pinsAt`, in milliseconds since the epoch): then the pins win. See the CLI's
+    [pins and the store's state](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/cli.md).
+  - A zone that fails at boot is reported (`zones.boot()`) and skipped. Zones still starts.
+  - A version pruned out of the rollback window is gone from the store: rolling back to it means pulling it again
+    first (`next-zones pull … --store`, or a ping for a zone with `livePull`).
+- **`next-zones start` and new builds.** `start` serves the workspace's `.zones-store`, so `next-zones build blog`
+  (into that store) and `build blog --pack` (into `.zones-images`, one of its sources) are both installable at once.
+- **`<store>/zones.pid`** names the Zones serving from the store, so `next-zones prune` never works under it.
+- **The store can live anywhere** (a volume, another disk). A zone's dependencies resolve from the shell's
+  `node_modules`.
+
+## Endpoints
+
+Zones serves **no URL of its own unless the project declares it**, in the shell's `next.config`, under one base path
+(`/_next-zones` unless changed):
+
+```js
+export default zoneConfig({
+  mount: "/",
+  endpoints: { base: "/_next-zones", events: true, health: true, admin: true },   // each group off unless set
+});
+```
+
+`createZones({ endpoints })` overrides the shell's declaration (`false` for none). The base may not be a path the
+shell serves, or a zone's mount.
+
+One more URL needs no group: with the shell's `metrics: true`, `GET <base>/metrics` serves the
+[metrics](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/metrics.md) to an admin, whether `endpoints` is declared or not. `endpoints: { admin: true }` is not needed
+for it.
+
+**An admin** is a request with `Authorization: Bearer <token>`, the token being `createZones({ adminToken })` or, for
+the CLI and `zones.js`, `NEXT_ZONES_ADMIN_TOKEN`. When no token is configured, an admin is any request from the same
+machine (a loopback address).
+
+| Group | Endpoint | What it does |
+|---|---|---|
+| `events` | `GET <base>/events` | The swap events [`<ZoneUpdates />`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/updates.md) listens to: only zone names and versions. Public |
+| `health` | `GET <base>/health` | Public: 200 `{ ok, degraded }` once Zones serves, for a supervisor such as Docker's `HEALTHCHECK`. A zone that failed at boot makes it `degraded`, not unhealthy: a restart would not fix its build. An admin also gets the active versions, the boot failures, uptime and RSS |
+| `admin` (every endpoint of the group needs the admin token) | `GET <base>/images` | The zone images in the store, by zone: version, active or not, live pull, built with, integrity |
+| | `GET <base>/images/<zone>/<version>` | One zone image |
+| | `POST <base>/images/<zone>/<version>/pull` | Asks Zones to pull it from its sources into the store, without installing it: 200 `{ pulledFrom }` (`null` when it was there); 409 with the reason when refused. A ping: only for a zone that allows [live pulls](#live-pulls) |
+| | `POST <base>/images/<zone>/<version>/install` | Installs, swaps to or rolls back to it, pulled first (as a ping) when the store lacks it: 200 with the timings; 409 with the reason when refused (nothing changes) |
+| | `DELETE <base>/images/<zone>/<version>` | Removes it from the store. Never the active version; one whose code other versions still share is refused until a restart |
+| | `POST <base>/prune?keep=2[&dry=1]` | [Prunes](#pruning) the store: `{ removed, held, kept, freedBytes }`. `dry=1` only says what it would do |
+| | `POST <base>/collect?keep=2` | Collects old versions' loaded code and disk caches (not their images), keeping the active one and `keep` before it per zone |
+| | `POST <base>/policy` | Replaces the instrumentation policy in the running Zones (not the file): the body is the JSON of [`zones.config.json`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/instrumentation.md#the-policy), `{ "instrumentation": { … } }`, and replaces the whole policy (what it leaves out is back to the default); 200 with the policy now in force |
+
+**A zone image never travels over these endpoints.** There is no upload: they ask Zones to pull, and Zones fetches
+the image from its own sources.
+
+A request that is not an admin's gets 401 `{ error }`, and nothing changes. A token never goes in `next.config`.
+
+## What happens on an install
+
+1. **Stage.** Zones reads the zone build: its routes, server actions and prerendered pages. Then it checks the
+   rules: the mount, the aliases, no zone-level `proxy.ts`, the same Next version.
+2. **Prepare.** Everything that grows with the size of the app is computed **before** the switch.
+3. **Switch.** One synchronous step, so no request ever sees half an install. It takes about **3 µs** (median, an app
+   of 248 routes, 75 of them dynamic, and a zone of 29 routes).
+
+The heavy work of a first install (seeding the zone's cache, analysing its chunks) runs in worker threads, so the
+server keeps answering while it runs. Reinstalling a version, for a rollback, takes about 4 ms.
+
+Under load, with 32 clients and 18 swaps, no request got a wrong answer.
+
+A rollback is the same operation with the previous version. Installs can run at the same time: their heavy work
+runs in parallel, and their switches take turns.
+
+## What a user notices
+
+- **Nothing reloads.** `<Link>` between zones is soft, and client state is kept.
+- **After a swap,** the next navigation renders the new version, its client code included. With
+  [`<ZoneUpdates />`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/updates.md) in the shell, that holds even for a static page the tab had cached.
+
+## What is shared
+
+- **One React, and one copy of every module the zones share** (a layout, a UI kit, a database client), on the server
+  and in the browser.
+- **Each zone's own modules stay its own,** and so does each version's: v1 and v2 never mix.
+- **A module is shared only when it is the same module:** the same code, whatever ids the builds gave it (a bigger
+  build has longer ids). A zone built against another version of a package than the shell gets its own copy of that
+  package's modules. That is right for code without state; a module with state (a context, a singleton) then exists
+  twice, and the zone does not see what the shell set up in it (a provider in the shell's layout, a client). The
+  install names such modules in its `warnings` (and the log); `createZones({ strictModules: true })` refuses the zone
+  instead. Build the shell and the zones against the same versions of what they share.
+- **One project root for every build:** Zones refuses a zone image built from another root than the shell's
+  ([configuration](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/configuration.md#the-project-root)).
+
+## What works inside a zone
+
+All of App Router's routing (dynamic and catch-all routes, groups, parallel and intercepting routes, `loading`,
+`error`, `not-found`), route handlers and metadata routes, server actions, prerendering, ISR and
+`generateStaticParams`, revalidation across zones, `next/font`, `next/image`, [public files](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/assets.md), the shell's
+`proxy.ts`, the zone's [routing rules](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/routing-rules.md), [aliases](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/aliases.md), [instrumentation](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/instrumentation.md).
+
+See [What is supported](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/support.md) for the full list.
+
+## Zone images
+
+A **zone image** is one version of a zone as `next-zones build` stores it: `<store>/<zone>/<version>/`, the build
+with `zone.json`. It holds only what serving needs (no build cache, traces or generated types): 18 MB for the test
+blog, 3.5 MB packed. A real app's image can weigh hundreds of MB. `next-zones pack <zone image dir>` packs one into a
+single `.tgz`, the form a source serves.
+
+### How an image enters the store: a pull
+
+An image enters a store only by being **pulled**: the server fetches it from a **source**, checks it, and moves it into
+the store in one rename. Nothing is uploaded to Zones. (A store can also be built into directly, with
+`next-zones build --store`, on a machine that builds.)
+
+- **Sources** are given to Zones (`createZones({ sources })`, `next-zones serve --source`), tried in order.
+  `@runsnip/next-zones/sources` has three:
+  - `fromHttp("https://…/{zone}/{version}.tgz", { headers, stallMs, retries })`;
+  - `fromConnector({ origin, owner, token })`: service-connector, an image gateway that checks who may pull what
+    (`GET /api/connector/images/zones/<owner>/<zone>@<version>`; `next-zones serve --connector <origin>
+    --connector-owner <owner>`, the token from `NEXT_ZONES_CONNECTOR_TOKEN`). A refusal fails the pull with the reason
+    it gives (`401 sign_in_required`, `403 plan_limit`);
+  - `fromDirectory(root)`: a folder or a mounted volume holding `<zone>/<version>/`, `<zone>/<version>.tgz` or
+    `<zone>/<version>.zip`.
+
+  A source of your own is `{ name, fetch({ zone, version, into, signal }) }`: it writes the image's files into `into`
+  and resolves `true`, or resolves `false` when it does not have that version. It should stream, and pass `signal` on.
+- **Two formats.** An image arrives as a `.tgz` (`next-zones pack`) or a `.zip` (`next-zones pack --out x.zip`,
+  `build --pack --format zip`: the format of an image gateway's store), told apart by its first bytes. An archive whose
+  files sit in one top-level folder, as a repository's archive of a tag does (`<repo>-<ref>/zone.json`), is unwrapped.
+- **Streamed.** Both formats are unpacked as they arrive, with nothing spooled to disk. A `.zip`'s files are inflated
+  and written in parallel as the next ones arrive (up to 4 at once, 16 MB in flight), each checked against its CRC-32,
+  and its central directory, at its end, must agree with what was written. Nothing holds the whole image in memory: a
+  300 MB image pulls in about 0.4 s at 155 MB peak RSS as `.tgz`, 0.6 s at 210 MB as `.zip` (see
+  [the numbers](#the-numbers)).
+- **Over a shared link.** A response that sends nothing for `stallMs` (30 s) is dropped, and a dropped or stalled
+  response is resumed from the byte reached (`Range`, with `If-Range` so a changed file is never spliced), up to
+  `retries` (3) times. Only the wait on the network counts toward a stall, not the time the disk takes. A server that
+  cannot resume fails the pull, and the store is unchanged.
+- **Checked.** A pulled image must name the zone and version asked for, and match the integrity recorded at build
+  time. Anything else is refused, and the store and the active version are unchanged.
+
+**Who asks for a pull:**
+- **The server side, for any zone:** `next-zones pull <zone> <version> --store <dir> --source …` (a deploy step),
+  `zones.pull()` and `zones.install()` from code, and a version pinned at boot that the store lacks.
+- **A ping, for a zone that allows it:** an admin request, `POST <base>/images/<zone>/<version>/pull` (or `/install`
+  of a version the store lacks; `next-zones pull … --url`, `next-zones install … --url`). See below.
+
+### Live pulls
+
+A ping can make Zones pull only a zone that declares it: `zoneConfig({ mount, livePull: true })`, recorded in every
+image's `zone.json`.
+- Zones reads the flag from the zone's latest image in the store **before anything is fetched**, so a ping for a zone
+  without it costs nothing. The pulled image must declare it too.
+- A zone's **first image** is pulled on the server side: before it, there is nothing to read the flag from.
+- Without `livePull`, the zone's images are pulled on the server side only, by the deploy.
+
+### The disk
+
+A pull leaves **`minFree`** bytes free on the store's disk (`createZones({ minFree })`, `--min-free <MB>`; 1 GiB by
+default).
+- **Before it starts,** the image's size is estimated from the zone's latest image (`zone.json` records the build's
+  bytes). Short of room, Zones prunes the store first; if it still does not fit, the pull is refused, with the numbers.
+- **While it runs,** the free space is read every 250 ms. The pull stops as soon as it falls below `minFree`, and
+  what it wrote is removed. A source's sizes are never trusted.
+
+### Pruning
+
+Every pull adds an image, so a store left alone fills its disk. **Pruning removes the images no longer needed**, with
+their disk caches. For each zone with an active version, it keeps:
+- the **active** version;
+- the version **pinned** for it (`zones.json`, `createZones({ pins })`);
+- the **`keep`** versions installed last before the active one (2 by default): the rollback window, from the install
+  history in `state.json`, so it holds across restarts;
+- images **pulled but not installed yet** (added after the zone's last install);
+- images being installed, and images whose loaded code other versions still share (reported as `held`; they go after a
+  restart).
+
+Every other version of that zone is removed. A zone with no active version is left alone. Folders a crashed pull left
+behind are removed too.
+
+**When it runs:**
+- **automatically**, after every pull and install, and at boot (`createZones({ prune: { keep: 2, auto: true } })`;
+  `{ auto: false }` or `prune: false` to turn it off; `next-zones serve --keep <n>` or `--no-prune`);
+- **on request:** `POST <base>/prune?keep=…`, `zones.prune({ keep, dryRun })`, `next-zones prune --url …`;
+- **on a store no Zones runs on:** `next-zones prune --store <dir> [--keep 2] [--pins zones.json] [--dry-run]`. It is
+  refused while a Zones serves from that store (`zones.pid`): that Zones must unload what is removed, so prune it
+  through Zones.
+
+**Memory.** When a version is collected, its code is unloaded, and once Zones has been idle for a second it hands
+back what V8 still keeps of it (its compilation cache, the heap's grown pages) with a last-resort collection: tens of
+ms, at most once per collect, and never while a request is in flight unless 30 s have passed
+(`createZones({ reclaim: { idleMs, maxWaitMs } })`, or `false`). Over 120 versions of a test zone, RSS stays flat.
+
+Pruning is distinct from **collecting** (`POST <base>/collect`): collecting frees what a running Zones holds for an
+old version (loaded code, disk caches) and leaves its image in the store; pruning removes images.
+
+### The numbers
+
+Pulling one zone image over HTTP (`fromHttp` into an empty folder), each run in a fresh process: a synthetic,
+build-shaped image (files of 4 KB to 2 MB, 60% random bytes, 40% repetitive JavaScript), median of 3 runs, Node
+24.16, Apple M1. Peak RSS includes Node's own ~45 MB. Repeat it with `node tools/bench/pull.mjs --mb 300 --against <git ref>`.
+
+| Image | Format | Peak RSS | Time |
+|---|---|---|---|
+| 300 MB (176 MB packed) | `.tgz` | 155 MB | 0.4 s |
+| 300 MB | `.zip` (`--format zip`) | 210 MB | 0.6 s |
+| 600 MB | `.tgz` | 167 MB | 0.8 s |
+
+Measured 2026-10-09. The 12 MB between 300 and 600 MB is garbage not yet collected, not the image: memory stays flat
+as images grow. The reader before streaming held the whole image in memory: 756 MB peak and 7.0 s for the 300 MB
+image, on the same machine when it was replaced.
+
+## Supported Next versions
+
+Zones works on Next's internals, so it runs only on the Next versions next-zones has been checked against (today
+16.3.6, 16.3.7, 16.3.8 and 16.4.0; 16.3.8 fixes security issues in Next, among them SSRF in the image optimizer and
+cache poisoning: use 16.3.8 or 16.4.0). On any other version, or on a Next where a module or function it hooks has moved, `createZones` throws before
+anything is hooked, and lists every difference. That check is Zones' (mode `"zones"`); `next-zones build`, `dev`
+and mode `"single"` run Next itself, with no hook. They check nothing more than the package manager does with the
+peer range (`next` 16.3.6, 16.3.7, 16.3.8 or 16.4.0), which warns on another version; use one of those, since what
+they build is what Zones runs:
+
+```
+next-zones: this Next does not match what Zones relies on (next 16.5.0):
+  - Next 16.5.0 has not been checked with next-zones (checked: 16.3.6, 16.3.7, 16.3.8, 16.4.0); run tools/upgrade-guard.mjs 16.5.0, …
+```
+
+`createZones({ unsupportedNext: true })` runs anyway. It is meant for the upgrade guard, which runs the whole check
+suite on the new version before it is added.
+
+---
+
+<!-- docs/metrics.md -->
+
+# Metrics
+
+One store of metrics for the whole Zones process: what Zones measures of itself, and what any zone's code measures,
+read as Prometheus text. Off unless the shell turns it on.
+
+```js
+// shell/next.config.mjs
+export default zoneConfig({ mount: "/", metrics: true });
+```
+
+`createZones({ metrics })` overrides the shell's declaration.
+
+## Reading it
+
+`GET <base>/metrics` (`/_next-zones/metrics` unless the shell's endpoints declare another base). `metrics: true` alone
+opens it: `endpoints` need not be declared, and `endpoints: { admin: true }` is not needed. It answers an admin only: a request
+with `Authorization: Bearer <adminToken>`, or from the same machine when no token is configured. The body is
+Prometheus' text format (`text/plain; version=0.0.4`): point a Prometheus scraper, an OpenTelemetry collector or
+any tool that reads that format at it. Nothing is pushed anywhere.
+
+## What Zones measures
+
+| Metric | Type | Labels | |
+|---|---|---|---|
+| `nextzones_requests_total` | counter | `zone`, `version`, `code` (`2xx`…`5xx`) | Every request; `zone` is `shell` for the shell's pages and `static` for `/_next/…` files |
+| `nextzones_request_duration_seconds` | histogram | `zone` | Time to the end of each response |
+| `nextzones_install_seconds` | histogram | `zone`, `outcome` | Installs, from staging to serving |
+| `nextzones_install_blocked_seconds` | histogram | `zone` | The longest the event loop was held during an install |
+| `nextzones_pull_seconds` | histogram | `zone`, `via`, `outcome` | Pulls of a zone image from a source |
+| `nextzones_pruned_images_total`, `nextzones_pruned_bytes_total` | counter | | What pruning removed |
+| `nextzones_zone_active` | gauge | `zone`, `version` | 1 for the version that serves; 0 once a swap replaced it |
+| `nextzones_registry_modules` | gauge | | Server modules shared across builds |
+| `nextzones_registry_shared_total` | counter | | Times a build used a module another build had loaded |
+| `nextzones_reclaims_total` | counter | | Last-resort collections after a version was collected |
+| `process_resident_memory_bytes`, `nodejs_heap_used_bytes`, `nodejs_heap_total_bytes`, `nodejs_external_memory_bytes` | gauge | | The process |
+| `nodejs_eventloop_delay_seconds` | gauge | `quantile` (`0.5`, `0.99`, `1`) | Event loop delay since the last read |
+| `process_uptime_seconds` | gauge | | |
+
+## Measuring in a zone
+
+```ts
+import { counter, gauge, histogram, time } from "@runsnip/next-zones/metrics";
+
+const exportsStarted = counter("blog_exports_total", { help: "Exports started" });
+const queue = gauge("blog_queue_length", { help: "Jobs waiting" });
+const size = histogram("blog_export_bytes", { help: "Export sizes", buckets: [1e4, 1e5, 1e6, 1e7] });
+
+exportsStarted.inc({ format: "pdf" });
+queue.set(12);
+size.observe(file.byteLength);
+const html = await time("blog_render_seconds", () => render(post), { kind: "post" });   // labelled outcome "ok" or "error"
+```
+
+- **One store for every zone.** The shell and each zone are separate builds, and each bundles this module; they all
+  write to the one store Zones opened. Two zones may write one metric (with labels of their own).
+- **Off, they do nothing.** With metrics off, or in the browser, or when the zone runs alone with `next start`, every
+  function returns without a trace, so a zone's code can measure unconditionally.
+- **Prometheus' rules:** a name is letters, digits, `_` and `:`; a counter only goes up; values in base units (seconds,
+  bytes). A name keeps the type it was first used with: using it as another type throws.
+- **The functions:**
+  - `help` is optional everywhere (Prometheus' `# HELP` line);
+  - `counter(name, { help })` → `.inc(labels?)`, `.inc(n, labels?)`;
+  - `gauge(name, { help })` → `.set(value, labels?)`, `.inc(…)`, `.dec(…)` (as a counter's);
+  - `histogram(name, { help, buckets? })` → `.observe(value, labels?)`. The default buckets are seconds: a histogram of
+    anything else (bytes, items) passes its own;
+  - `time(name, fn, labels?, { help?, buckets? }?)` runs `fn` (sync or async), returns what it returns, and observes its
+    seconds into the histogram `name`, labelled `outcome` `"ok"` or `"error"` (an error is thrown on);
+  - `enabled()` says whether the store is open; `render()` is the Prometheus text that `/metrics` serves;
+  - `collect(fn)` runs `fn` before each read, to set gauges from the current state, and returns a function that
+    removes it.
+- **Buckets.** A histogram, and `time()`, use buckets in seconds unless given others (`time(name, fn, labels,
+  { buckets })`): 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60.
+
+---
+
+<!-- docs/support.md -->
+
+# What is supported
+
+Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router. Key:
+- ✅ works: verified in a browser or over HTTP;
+- 🟡 expected to work: not verified yet;
+- 🔧 planned: not done yet; where it would otherwise fail silently, refused at install until it is;
+- ⛔ not possible for a zone, and refused at install so it never fails silently.
+
+## Routing
+
+| | |
+|---|---|
+| `page`, `layout`, dynamic routes, catch-all, optional catch-all, route groups, parallel routes | ✅ |
+| `loading` (streaming), `error`, `not-found` | ✅ |
+| Intercepting routes (modals) | ✅ |
+| Route handlers (`route.ts`) | ✅ |
+| A zone's metadata routes (`/blog/sitemap.xml`, `/blog/opengraph-image`) | ✅ (the root `/sitemap.xml` and `/robots.txt` are the shell's) |
+| Mounts and [aliases](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/aliases.md) | ✅ |
+| The shell's `proxy.ts` in front of every zone | ✅ |
+| A zone's own `proxy.ts` | ⛔ (move its logic into the shell's proxy) |
+| A zone's `headers`, `redirects`, `rewrites` (see [routing rules](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/routing-rules.md)) | ✅ |
+| `basePath`, `i18n`, `trailingSlash`, `assetPrefix`, `skipTrailingSlashRedirect`, `cacheComponents`, `partialPrefetching` different from the shell's | ⛔ |
+
+## Navigation
+
+| | |
+|---|---|
+| `<Link>` shell ↔ zone and zone ↔ zone, Back/Forward, prefetch | ✅ soft, state kept |
+| `useRouter`, `usePathname`, `useParams`, `useSearchParams`, `router.push` into another zone | ✅ |
+| `redirect()` into another zone, `notFound()` | ✅ |
+| `permanentRedirect`, `forbidden`, `unauthorized` | 🟡 |
+| New client code after a version swap, even for a page an open tab has cached | ✅ (with [`<ZoneUpdates />`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/updates.md)) |
+| A shared package at different versions in different zones, in one page | ✅ each zone runs its own version ([concepts](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/concepts.md#the-contract-between-zones)) |
+
+## Rendering and data
+
+| | |
+|---|---|
+| Server and client components, one React | ✅ |
+| Server actions (with bound arguments) | ✅ |
+| Prerendered pages, ISR, `generateStaticParams` (with `dynamicParams` and fallback) | ✅ |
+| `revalidateTag` and `revalidatePath` across zones, `unstable_cache` | ✅ |
+| `cookies`, `headers`, `connection` | ✅ |
+| `'use cache'`, `cacheTag`, `cacheLife`, Cache Components / PPR | ✅ (`cacheComponents` must be the same in the shell and every zone) |
+| Edge runtime in a zone | 🔧 refused at install today (use the Node.js runtime) |
+
+## Assets
+
+| | |
+|---|---|
+| Client chunks, CSS modules | ✅ |
+| `next/font` | ✅ |
+| `next/image` with local images (imported, or from the zone's `public/`) | ✅ |
+| A zone's own `images` config (remote patterns…) that differs from the shell's | 🔧 refused at install today (put it in the shell's config, which serves every zone). A zone with no `images` config, or the shell's, installs |
+| A zone's `public/` files, under its mount | ✅ (see [assets](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/assets.md)) |
+
+## Process
+
+| | |
+|---|---|
+| [Instrumentation](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/instrumentation.md), the shell's and each zone's | ✅ |
+| A zone's `instrumentation-client.ts` | ⛔ (put it in the shell) |
+| A zone's dependencies (`serverExternalPackages` included), wherever its build is stored | ✅ (they resolve from the shell's `node_modules`) |
+| A package only in a zone's own `node_modules` (not hoisted by the workspace) | ✅ bundled into the zone's build; 🟡 as a `serverExternalPackages` entry, which must be in the shell's `node_modules` |
+| Zones built with a different Next or React than the server's | ⛔ |
+| Many requests at once across zones, several installs at once, and swaps under load | ✅ |
+| A shell with its own `cacheHandler` (a remote cache) | ✅ (it keeps every key but the zones' pages, which stay per version) |
+| A zone run alone (`next start`, `next dev`), with its aliases | ✅ ([running alone](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/configuration.md#running-a-zone-alone)) |
+| `next dev` across zones | ✅ [`next-zones dev`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/cli.md#next-zones-dev): HMR and soft navigation, every zone at once |
+| Pages Router (`pages/`) in a zone | 🔧 refused at install today (Next's own `/404` and `/500` aside): use `app/` |
+| `output: "export"` | ✅ both modes: one static site, soft navigation between zones ([build and start](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/cli.md#build-and-start)) |
+| `output: "standalone"` | ✅ both modes: the folder alone is the deploy ([build and start](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/cli.md#build-and-start)) |
+
+## Zone images
+
+| | |
+|---|---|
+| Images entering the store by a pull from a source (HTTP, a folder, one's own), streamed and checked | ✅ ([zone images](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#zone-images)) |
+| Uploading an image to Zones | ⛔ by design: endpoints only ask Zones to pull |
+| Pulls on a ping, for a zone with `livePull` | ✅ ([live pulls](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#live-pulls)) |
+| Images of hundreds of MB | ✅ streamed: memory does not grow with the image |
+| Images as `.zip`, and a repository's archive of a tag (one top-level folder) | ✅ |
+| Pulls over a shared link: stalls and dropped connections resumed with `Range` | ✅ |
+| service-connector as the source (`fromConnector`) | ✅ against its documented API |
+| A pull that would fill the disk | ✅ refused before it starts, or stopped while it runs ([the disk](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#the-disk)) |
+| Pruning old images, automatically or on request | ✅ ([pruning](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#pruning)) |
+
+## One app
+
+| | |
+|---|---|
+| Every zone built into one Next app (`mode: "single"`), served by `next start` | ✅ ([build and start](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/cli.md#build-and-start)) |
+| Each zone's own `@/*` and its types, in that one app | ✅ (types checked per zone, with its own `tsconfig`) |
+| Instrumentation in that one app | ✅ as on Zones: the shell's for every route, each zone's for its own |
+| Installing a zone into it while it runs | ⛔ by design: that is what images and Zones are for |

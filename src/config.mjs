@@ -114,15 +114,18 @@ const ZONE_KEYS = ["mount", "aliases", "livePull", "endpoints", "mode", "metrics
 /**
  * A zone's Next config with its zone declaration: zoneConfig({ mount: "/blog", ...nextConfig }), one object, the
  * declaration's keys (ZONE_KEYS) taken out and the rest passed to Next. A Next config that is a function of the phase
- * comes second: zoneConfig({ mount: "/blog" }, (phase) => …), so the declaration is known without calling it. The
- * form zoneConfig(declaration, nextConfigObject) is still read.
+ * comes second: zoneConfig({ mount: "/blog" }, (phase) => …), so the declaration is known without calling it; Next
+ * keys of the first object are laid under what it returns. The form zoneConfig(declaration, nextConfigObject) is
+ * still read, the same way.
  */
 export function zoneConfig(options, second) {
-  let zone = options, nextConfig = second ?? {};
-  if (second === undefined && options && typeof options === "object") {
-    zone = {}; nextConfig = {};
-    for (const [key, value] of Object.entries(options)) (ZONE_KEYS.includes(key) ? zone : nextConfig)[key] = value;
-  }
+  /* The first object is always split: its Next keys are the base the second (an object, or a function's result)
+     is laid over, so none is dropped whichever form is used. */
+  const zone = {}, base = {};
+  if (options && typeof options === "object") for (const [key, value] of Object.entries(options)) (ZONE_KEYS.includes(key) ? zone : base)[key] = value;
+  let nextConfig = base;
+  if (typeof second === "function") nextConfig = async (...args) => ({ ...base, ...(await second(...args)) });
+  else if (second !== undefined) nextConfig = { ...base, ...second };
   const declared = checkZone(zone);
   const apply = (config) => {
     /* NEXT_ZONES_BUILD: "dev" in next-zones dev's composed app (one next dev, no build options needed), anything else

@@ -34,7 +34,7 @@ next-zones keeps the separation (each zone builds, versions and deploys on its o
 1. [Concepts](concepts.md): zones, the shell, mounts, aliases, versions
 2. [Getting started](getting-started.md)
 3. [Configuration: `zoneConfig`](configuration.md)
-4. [CLI: `next-zones check`](cli.md)
+4. [CLI](cli.md): every command
 5. [Root URLs: aliases](aliases.md)
 6. [Routing rules: a zone's headers, redirects and rewrites](routing-rules.md)
 7. [Instrumentation](instrumentation.md)
@@ -43,6 +43,12 @@ next-zones keeps the separation (each zone builds, versions and deploys on its o
 10. [Zones: live installs](zones.md)
 11. [Metrics](metrics.md)
 12. [What is supported](support.md)
+
+## For assistants
+
+The package ships `llms.txt` (the essentials) and `llms-full.txt` (every page above in one file), and a skill for
+coding assistants, `skills/next-zones/SKILL.md`: copy its folder into a project's skills folder (for Claude Code,
+`.claude/skills/`) so an assistant reads those files before it answers.
 
 ## License
 

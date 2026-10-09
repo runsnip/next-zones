@@ -17,6 +17,7 @@ write("shell/package.json", `{ "name": "doctor-shell" }`);
 write("shell/next.config.mjs", config({ mount: "/" }, `{ env: { LABEL: "shell" } }`));
 write("shell/app/layout.tsx", page);
 write("shell/app/page.tsx", page);
+write("shell/app/(site)/shell-owned/page.tsx", page);
 write("bad/package.json", `{ "name": "doctor-bad" }`);
 write("bad/next.config.mjs", config({ mount: "/bad", aliases: [{ source: "/shell-owned/:id", destination: "/bad/:id" }] },
   `{ basePath: "/x", env: { LABEL: "bad" }, images: { remotePatterns: [{ hostname: "example.com" }] }, async rewrites() { return [{ source: "/elsewhere/:p", destination: "/bad/:p" }]; } }`));
@@ -27,6 +28,8 @@ write("bad/app/bad/page.tsx", page);
 write("bad/app/bad/api/route.ts", `export const runtime = "edge";\nexport function GET() { return new Response("x"); }\n`);
 write("bad/app/other/page.tsx", page);
 write("bad/public/logo.svg", "<svg/>");
+write("bad/pages/legacy.tsx", page);
+write("bad/pages/_app.tsx", page);
 /* For Next's and React's own checks: a hook called conditionally, and a type error. */
 write("bad/app/bad/counter.tsx", `"use client";
 import { useState } from "react";
@@ -60,6 +63,8 @@ const expected = {
   outsideMount: /bad: app\/other is outside its mount/,
   edge: /bad: app\/bad\/api\/route\.ts uses the edge runtime/,
   publicStray: /bad: public\/ has files outside public\/bad\/: logo\.svg/,
+  shellSegment: /bad: \/shell-owned is the shell's too/,
+  pagesRouter: /bad: has Pages Router routes \(pages\/legacy\.tsx\)/,
   env: /! (bad|shell): env LABEL differs/,
   gitNext: /✗ git: not ignored by git: [^\n]*\.next/,
   gitDev: /✗ git: not ignored by git: [^\n]*\.zones-dev/,

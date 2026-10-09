@@ -21,7 +21,7 @@ const CONFIG_FILES = ["next.config.mjs", "next.config.js", "next.config.ts", "ne
 const SHARED_PACKAGES = ["next", "react", "react-dom"];
 /* What shapes every URL, or every image: the shell's serves all zones (as stage.cjs checks on a build). */
 const SAME_AS_SHELL = ["basePath", "i18n", "trailingSlash", "assetPrefix", "skipTrailingSlashRedirect", "cacheComponents", "partialPrefetching"];
-const IMAGE_KEYS = ["remotePatterns", "domains", "localPatterns", "unoptimized", "dangerouslyAllowSVG", "dangerouslyAllowLocalIP"];
+const { imageKeysDiffering } = createRequire(import.meta.url)("./zones/image-config.cjs");
 /* Files a zone's app/ may hold at its top level besides its mount: used when it runs alone, the shell's on Zones. */
 const ROOT_ONLY = /^(layout|not-found|global-error|global-not-found|error|loading|template|default)\.(tsx|ts|jsx|js)$|\.(css|scss|sass)$/;
 const SOURCE = /\.(tsx|ts|jsx|js|mjs)$/;
@@ -183,7 +183,7 @@ export async function doctor({ dirs, store, url, fast = false, print = console.l
     if (shellConfig) {
       const differs = SAME_AS_SHELL.filter((key) => JSON.stringify(config[key] ?? null) !== JSON.stringify(shellConfig[key] ?? null));
       if (differs.length) fail(z.name, `${differs.join(", ")} differ from the shell's`, "these shape every URL: set them in the shell's next.config only");
-      const images = IMAGE_KEYS.filter((key) => JSON.stringify(config.images?.[key] ?? null) !== JSON.stringify(shellConfig.images?.[key] ?? null));
+      const images = imageKeysDiffering(config.images, shellConfig.images);
       if (images.length) fail(z.name, `images.${images.join(", images.")} differ from the shell's`, "the shell's image optimizer serves every zone: put them in the shell's next.config");
     }
     const own = new Set([z.mount, ...(z.aliases ?? []).map((a) => `/${a.source.split("/")[1]}`)]);
@@ -198,6 +198,21 @@ export async function doctor({ dirs, store, url, fast = false, print = console.l
     }
     for (const file of ["instrumentation-client.ts", "instrumentation-client.js"]) {
       if (fs.existsSync(path.join(z.dir, file)) || fs.existsSync(path.join(z.dir, "src", file))) fail(z.name, `has ${file}`, "it runs only in the zone's own documents, never when reached from the shell: move it into the shell's");
+    }
+    /* A mount or an alias on a segment the shell serves: refused at install (stage.cjs). The shell's app/<segment>,
+       also inside route groups ((group)/<segment>). */
+    const shellApp = shell && ["app", "src/app"].map((d) => path.join(shell.dir, d)).find((d) => fs.existsSync(d));
+    if (shellApp) {
+      const groups = fs.readdirSync(shellApp).filter((e) => /^\(.+\)$/.test(e)).map((g) => path.join(shellApp, g));
+      const shellServes = (segment) => [shellApp, ...groups].some((d) => fs.existsSync(path.join(d, segment)));
+      for (const segment of [z.mount.slice(1), ...(z.aliases ?? []).map((a) => a.source.split("/")[1])]) {
+        if (shellServes(segment)) fail(z.name, `/${segment} is the shell's too (its app/${segment})`, `a segment has one owner: move the shell's app/${segment} away, or mount the zone elsewhere`);
+      }
+    }
+    /* Pages Router routes: refused at install (stage.cjs). Next's own pages (_app, _document, _error, 404, 500) are not. */
+    for (const pagesDir of ["pages", "src/pages"].map((d) => path.join(z.dir, d)).filter((d) => fs.existsSync(d))) {
+      const routes = fs.readdirSync(pagesDir, { recursive: true }).map(String).filter((f) => SOURCE.test(f) && !/^(_app|_document|_error|404|500)\.\w+$/.test(f));
+      if (routes.length) fail(z.name, `has Pages Router routes (${path.relative(z.dir, pagesDir)}/${routes.slice(0, 3).join(", ")}${routes.length > 3 ? ", …" : ""})`, "Zones serves a zone's app/ routes only: move them into app" + z.mount + "/");
     }
     const appDir = ["app", "src/app"].map((d) => path.join(z.dir, d)).find((d) => fs.existsSync(d));
     if (!appDir) { fail(z.name, "has no app/ folder", "zones use the App Router"); continue; }
@@ -244,7 +259,7 @@ export async function doctor({ dirs, store, url, fast = false, print = console.l
   else {
     const must = [];                                      // [path, what, level]
     for (const dir of dirs) {
-      for (const name of [".zones-dev", ".zones-store", ".zones-images", ".zones-cache"]) must.push([path.join(dir, name), `${name}/`, "✗"]);
+      for (const name of [".zones-dev", ".zones-store", ".zones-images", ".zones-cache", ".zones-app", ".zones-export"]) must.push([path.join(dir, name), `${name}/`, "✗"]);
       must.push([path.join(dir, "node_modules"), "node_modules/", "✗"]);
     }
     for (const z of zones) {

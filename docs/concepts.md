@@ -40,7 +40,9 @@ Zones served together must share:
 - **one `node_modules`:** the same Next, the same React, the same layout (a monorepo workspace does this);
 - **the same root layout output:** in practice, every zone renders the same root layout component from a shared
   package;
-- **the same `basePath`, `i18n` and `trailingSlash`.**
+- **the same `basePath`, `i18n`, `trailingSlash`, `assetPrefix`, `skipTrailingSlashRedirect`, `cacheComponents`,
+  `partialPrefetching`** (Zones refuses a zone that differs, and names the key); and **no `images` key of a zone's own
+  that differs from the shell's** (a zone with no `images` config fits any shell).
 
 **Shared packages may differ in version between zones.**
 - Modules that are the same in two zones are loaded once and shared.

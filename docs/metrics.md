@@ -12,7 +12,8 @@ export default zoneConfig({ mount: "/", metrics: true });
 
 ## Reading it
 
-`GET <base>/metrics` (`/_next-zones/metrics` unless the shell's endpoints declare another base), to an admin: a request
+`GET <base>/metrics` (`/_next-zones/metrics` unless the shell's endpoints declare another base). `metrics: true` alone
+opens it: `endpoints` need not be declared, and `endpoints: { admin: true }` is not needed. It answers an admin only: a request
 with `Authorization: Bearer <adminToken>`, or from the same machine when no token is configured. The body is
 Prometheus' text format (`text/plain; version=0.0.4`): point a Prometheus scraper, an OpenTelemetry collector or
 any tool that reads that format at it. Nothing is pushed anywhere.
@@ -56,4 +57,16 @@ const html = await time("blog_render_seconds", () => render(post), { kind: "post
   function returns without a trace, so a zone's code can measure unconditionally.
 - **Prometheus' rules:** a name is letters, digits, `_` and `:`; a counter only goes up; values in base units (seconds,
   bytes). A name keeps the type it was first used with: using it as another type throws.
-- `collect(fn)` runs `fn` before each read, to set gauges from the current state.
+- **The functions:**
+  - `help` is optional everywhere (Prometheus' `# HELP` line);
+  - `counter(name, { help })` → `.inc(labels?)`, `.inc(n, labels?)`;
+  - `gauge(name, { help })` → `.set(value, labels?)`, `.inc(…)`, `.dec(…)` (as a counter's);
+  - `histogram(name, { help, buckets? })` → `.observe(value, labels?)`. The default buckets are seconds: a histogram of
+    anything else (bytes, items) passes its own;
+  - `time(name, fn, labels?, { help?, buckets? }?)` runs `fn` (sync or async), returns what it returns, and observes its
+    seconds into the histogram `name`, labelled `outcome` `"ok"` or `"error"` (an error is thrown on);
+  - `enabled()` says whether the store is open; `render()` is the Prometheus text that `/metrics` serves;
+  - `collect(fn)` runs `fn` before each read, to set gauges from the current state, and returns a function that
+    removes it.
+- **Buckets.** A histogram, and `time()`, use buckets in seconds unless given others (`time(name, fn, labels,
+  { buckets })`): 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60.

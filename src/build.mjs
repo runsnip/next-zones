@@ -203,7 +203,7 @@ export async function buildWorkspace({ dir = ".", zones: only = [], version, sto
     /* Next's output: "standalone" in the shell's config: its standalone folder becomes the whole deploy of Zones. */
     if (isStandalone(path.join(shell.dir, ".next"))) {
       const { name: _name, dir: _dir, ...declaration } = shell;
-      result.standalone = await prepareStandaloneZones({ shellDir: shell.dir, declaration, store: pack ? null : store, pins: result.pins });
+      result.standalone = await prepareStandaloneZones({ shellDir: shell.dir, declaration, store: pack ? null : store, pins: result.pins, policy: path.join(root, "zones.config.json") });
     }
   }
   return result;

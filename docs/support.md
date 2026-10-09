@@ -3,7 +3,7 @@
 Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router. Key:
 - ✅ works: verified in a browser or over HTTP;
 - 🟡 expected to work: not verified yet;
-- 🔧 planned;
+- 🔧 planned: not done yet; where it would otherwise fail silently, refused at install until it is;
 - ⛔ not possible for a zone, and refused at install so it never fails silently.
 
 ## Routing
@@ -19,7 +19,7 @@ Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router. Key:
 | The shell's `proxy.ts` in front of every zone | ✅ |
 | A zone's own `proxy.ts` | ⛔ (move its logic into the shell's proxy) |
 | A zone's `headers`, `redirects`, `rewrites` (see [routing rules](routing-rules.md)) | ✅ |
-| `basePath`, `i18n`, `trailingSlash`, `assetPrefix`, `cacheComponents` different from the shell's | ⛔ |
+| `basePath`, `i18n`, `trailingSlash`, `assetPrefix`, `skipTrailingSlashRedirect`, `cacheComponents`, `partialPrefetching` different from the shell's | ⛔ |
 
 ## Navigation
 
@@ -42,7 +42,7 @@ Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router. Key:
 | `revalidateTag` and `revalidatePath` across zones, `unstable_cache` | ✅ |
 | `cookies`, `headers`, `connection` | ✅ |
 | `'use cache'`, `cacheTag`, `cacheLife`, Cache Components / PPR | ✅ (`cacheComponents` must be the same in the shell and every zone) |
-| Edge runtime in a zone | ⛔ (use the Node.js runtime) |
+| Edge runtime in a zone | 🔧 refused at install today (use the Node.js runtime) |
 
 ## Assets
 
@@ -51,7 +51,7 @@ Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router. Key:
 | Client chunks, CSS modules | ✅ |
 | `next/font` | ✅ |
 | `next/image` with local images (imported, or from the zone's `public/`) | ✅ |
-| A zone's own `images` config (remote patterns…) | ⛔ (put it in the shell's config, which serves every zone) |
+| A zone's own `images` config (remote patterns…) that differs from the shell's | 🔧 refused at install today (put it in the shell's config, which serves every zone). A zone with no `images` config, or the shell's, installs |
 | A zone's `public/` files, under its mount | ✅ (see [assets](assets.md)) |
 
 ## Process
@@ -67,7 +67,7 @@ Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router. Key:
 | A shell with its own `cacheHandler` (a remote cache) | ✅ (it keeps every key but the zones' pages, which stay per version) |
 | A zone run alone (`next start`, `next dev`), with its aliases | ✅ ([running alone](configuration.md#running-a-zone-alone)) |
 | `next dev` across zones | ✅ [`next-zones dev`](cli.md#next-zones-dev): HMR and soft navigation, every zone at once |
-| Pages Router (`pages/`) | 🔧 (not supported yet) |
+| Pages Router (`pages/`) in a zone | 🔧 refused at install today (Next's own `/404` and `/500` aside): use `app/` |
 | `output: "export"` | ✅ both modes: one static site, soft navigation between zones ([build and start](cli.md#build-and-start)) |
 | `output: "standalone"` | ✅ both modes: the folder alone is the deploy ([build and start](cli.md#build-and-start)) |
 

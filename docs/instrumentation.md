@@ -12,7 +12,8 @@ A zone never sees another zone's errors.
 
 ## The policy
 
-`zones.config.json`, next to Zones:
+`zones.config.json`, in the workspace's folder (beside the zones' folders), read by `next-zones start`, `serve`,
+`zones.js` and mode `"single"` (see [the CLI](cli.md)); or `createZones({ policy })` with the same object:
 
 ```json
 {
@@ -34,4 +35,6 @@ A zone never sees another zone's errors.
 - **Swapping a version.** Next has no "unregister". If a zone exports `unregister()`, next-zones calls it on the
   version being replaced, before the new version's `register()`.
 
-> Available in Zones [preview](zones.md).
+> The same in both modes: on [Zones](zones.md), and in mode `"single"`, where next-zones writes the one app's
+> `instrumentation` file to dispatch this way. A zone's `register()` runs when Zones installs its image, or, in one
+> app, when that app starts.

@@ -16,7 +16,9 @@ const zoneFont = localFont({ src: "./fonts/my-font.woff2" });
 - **files from the zone's `public/`** (`src="/blog/logo.png"`).
 
 The image optimizer uses **the shell's** `images` settings: sizes, formats, remote patterns. Put remote patterns
-that a zone needs in the shell's config, until zone-level image config is supported.
+that a zone needs in the shell's config. A zone that sets no `images` config fits any shell. A key a zone sets of its own
+(not left at Next's default; set to Next's default, it counts as unset) and that differs from the shell's is refused at install today; zone-level image config is
+planned.
 
 ## Public files
 

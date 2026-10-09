@@ -31,6 +31,16 @@ test("in a build for Zones, a zone that sets a build option otherwise is told so
   } finally { delete process.env.NEXT_ZONES_BUILD; }
 });
 
+test("Next keys beside the declaration are kept in both two-argument forms, under the second's", async () => {
+  const fromFunction = await zoneConfig({ mount: "/blog", transpilePackages: ["shared"], reactStrictMode: false }, () => ({ reactStrictMode: true }))("phase-production-build", {});
+  assert.deepEqual(fromFunction.transpilePackages, ["shared"]);
+  assert.equal(fromFunction.reactStrictMode, true);
+  const fromObject = zoneConfig({ mount: "/blog", transpilePackages: ["shared"] }, { output: "standalone" });
+  assert.deepEqual(fromObject.transpilePackages, ["shared"]);
+  assert.equal(fromObject.output, "standalone");
+  assert.equal(fromObject.mount, undefined);
+});
+
 test("a config function is wrapped and keeps its declaration", async () => {
   const wrapped = zoneConfig({ mount: "/blog" }, async (phase) => ({ env: { PHASE: phase } }));
   assert.equal(typeof wrapped, "function");

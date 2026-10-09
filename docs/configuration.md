@@ -9,7 +9,8 @@ export default zoneConfig(zone, (phase) => nextConfig);  // a Next config that i
 
 One object holds both: `zoneConfig` takes out the zone's keys below and passes every other key to Next. A Next config
 that is a function of the phase comes second, after the zone's keys, so the declaration is known without calling it.
-`zoneConfig(zone, nextConfigObject)` is read too.
+`zoneConfig(zone, nextConfigObject)` is read too. In both two-argument forms, Next keys left in the first object are
+kept, and the second wins on a key both set.
 
 ## `zone`
 
@@ -18,7 +19,7 @@ that is a function of the phase comes second, after the zone's keys, so the decl
 | `mount` | `string` | yes | `"/"` for the shell, otherwise one URL segment such as `"/blog"` (lowercase letters, digits, `-`) |
 | `aliases` | `{ source: string; destination: string }[]` | no | URLs at the root that this zone serves. See [aliases](aliases.md) |
 | `endpoints` | `{ base?, events?, health?, admin? }` | no (the shell only) | The URLs Zones serves of its own, under `base` (`"/_next-zones"` by default); none unless declared. See [endpoints](zones.md#endpoints) |
-| `mode` | `"zones"` \| `"single"` | no (the shell only), `"zones"` | How the workspace is served: `"zones"`, the shell as an app and every other zone as an [image](zones.md#zone-images) Zones installs while it runs; `"single"`, every zone in one Next app run by `next start`. See [build and start](cli.md#build-and-start). Next's own options, `output` included, are Next's keys of the same object |
+| `mode` | `"zones"` \| `"single"` | no (the shell only), `"zones"` | How the workspace is served. `"zones"`: the shell is built as an app and every other zone as an [image](zones.md#zone-images), and Zones installs images while it runs. `"single"`: every zone is linked into one Next app, run by `next start`, with no live installs. See [build and start](cli.md#build-and-start). `output` and Next's other options stay Next's keys, in the same object |
 | `metrics` | `boolean` | no (the shell only), `false` | Opens one metrics store for the whole Zones process: requests by zone and version, installs, pulls, memory, and what a zone's code writes with `@runsnip/next-zones/metrics`; served as Prometheus text at `<base>/metrics` to an admin. Off, the metrics functions do nothing. See [metrics](metrics.md) |
 | `livePull` | `boolean` | no, `false` | Whether a ping (an admin request to Zones' `<base>/images/<zone>/<version>/pull` or `/install`) may make Zones pull this zone's images from its sources. Recorded in each zone image's `zone.json`; read from the zone's latest image before anything is fetched. Without it, the zone's images are pulled on the server side only (`next-zones pull`, a deploy step). Images already in the store install either way. See [live pulls](zones.md#live-pulls) |
 
@@ -29,7 +30,8 @@ URL segment like "/blog"`.
 
 The zone's own Next config:
 - every key of the object that is not the zone's;
-- or a function of the phase, `(phase, { defaultConfig }) => config`, which may be async, as the second argument.
+- or a function of the phase, `(phase, { defaultConfig }) => config`, which may be async, as the second argument: what
+  it returns is laid over the first object's Next keys, key by key at the top level.
 
 `zoneConfig` returns it with the build options below, the zone declaration (attached under a symbol that Next
 ignores and next-zones reads back), and, when the zone runs alone, its aliases as rewrites. Everything else in your
@@ -37,8 +39,10 @@ config is passed through unchanged.
 
 ## Next's options are yours
 
-`zoneConfig` passes the zone's Next config through as it is: next-zones never changes a Next option for you. `output`,
-`images`, `experimental` and the rest mean what they mean in Next, in every mode.
+`zoneConfig` passes the zone's Next config through as it is, with one exception: in a build made by `next-zones build`,
+it fills in the [build options for Zones](#build-options-for-zones) below, and nothing else. `output`, `images`,
+`experimental` and the rest mean what they mean in Next, in every mode. A plain `next build` or `next dev` gets the
+config untouched.
 
 ## Build options for Zones
 
@@ -49,6 +53,8 @@ three Turbopack options off in the builds Zones runs (the shell and every zone i
 nothing is filled in.
 
 If your config sets one of them otherwise, a build for Zones stops with an error naming it, rather than overriding it.
+Setting them to `false` yourself is allowed, and changes nothing. `turbopack.root` and `outputFileTracingRoot` you may
+set too: what counts is that the shell and every zone are built from one root.
 Zones refuses a shell or a zone image that was built without them, and says to build it with `next-zones build`.
 
 | Option | In a build for Zones | Why | Cost (measured) |
@@ -68,8 +74,13 @@ unset, to `NEXT_ZONES_ROOT`, or else to the nearest folder whose `node_modules` 
 shell's, and says so.
 
 Mode `"single"` links the same zone images into one app, where a module several builds use is also loaded once, so it
-needs them too. Debt D8 in the README tracks turning them back on (sharing modules by what they export, not by their
-whole code).
+needs them too.
+
+The cost is the size in the last column, and nothing else. Getting it back means sharing a module by what it exports,
+not by its whole code (debt D8 in the README). That was tried and measured: splitting a shared library into a
+fragment per export, or pinning only the modules that hold state, came back larger or not exact. What stops it is
+Turbopack itself: unused-export removal is one switch for the whole build, with no way to keep one module's exports
+whole. So the options stay off.
 
 ## Running a zone alone
 
@@ -88,7 +99,7 @@ export default zoneConfig({
   mount: "/blog",
   aliases: [{ source: "/post/:id", destination: "/blog/:id" }],
   transpilePackages: ["shared"],
-  images: { remotePatterns: [{ hostname: "images.example.com" }] },
+  reactStrictMode: true,
 });
 ```
 

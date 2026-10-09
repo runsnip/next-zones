@@ -47,9 +47,14 @@ import { zoneConfig } from "@runsnip/next-zones/config";
 
 export default zoneConfig({
   mount: "/",
+  endpoints: { events: true, health: true, admin: true },   // Zones' own URLs, under /_next-zones (see below)
   transpilePackages: ["shared"],
 });
 ```
+
+`endpoints` is the shell's only. `events` feeds [`<ZoneUpdates />`](updates.md), `health` answers a supervisor, and
+`admin` is what `next-zones install`, `pull --url` and `prune --url` talk to: without it they get a 404. See
+[endpoints](zones.md#endpoints).
 
 ```js
 // blog/next.config.mjs
@@ -61,7 +66,9 @@ export default zoneConfig({
 });
 ```
 
-Every route of `blog` lives under `blog/app/blog/…`.
+Every route of `blog` lives under `blog/app/blog/…`. At the top of `blog/app/` there may also be the root files Next
+needs when the zone runs alone (`layout`, `not-found`, `global-error`, `global-not-found`, `error`, `loading`,
+`template`, `default`, and CSS files); on Zones the shell's are used.
 
 ## 3. Share the root layout
 
@@ -118,7 +125,8 @@ next-zones start          # Zones on port 3000: the shell, with blog and shop in
 ```
 
 - **Releasing a zone** is bumping its version, building its image, and installing it on the running Zones:
-  `next-zones build blog`, then `next-zones install blog 1.1.0`. See [build and start](cli.md#build-and-start).
+  `next-zones build blog`, then `next-zones install blog 1.1.0` (it needs the shell's `endpoints: { admin: true }`).
+  See [build and start](cli.md#build-and-start).
 - **Each zone still runs on its own** with `next build` and `next start`.
 - **One Next app instead:** declare `mode: "single"` in the shell's `zoneConfig`; `next-zones build` then builds the
   workspace as one app, and `next-zones start` runs it with `next start`. No images, no live installs.

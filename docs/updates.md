@@ -43,7 +43,7 @@ nothing.
 
 ## Requirements
 
-- **Next.js 16.3.6, App Router.**
+- **Next.js 16.3.6, 16.3.7, 16.3.8 or 16.4.0, App Router** (see [supported Next versions](zones.md#supported-next-versions)).
 - **Every zone is built with the same Next, React and react-dom as the server that runs them.** The build records
   their versions, and a zone built with others is refused at install.
 - **One workspace.** The zones and the shell share one `node_modules`. A zone's dependencies, its
@@ -51,4 +51,5 @@ nothing.
   stored. A package the workspace did not hoist, in the zone's own `node_modules`, is bundled into its build:
   `next-zones build` resolves it as the zone does. An external package (`serverExternalPackages`) is not bundled, so
   it must be in the shell's `node_modules`.
-- **The same `basePath`, `i18n`, `trailingSlash`, `assetPrefix` and `cacheComponents`** as the shell's.
+- **The same `basePath`, `i18n`, `trailingSlash`, `assetPrefix`, `skipTrailingSlashRedirect`, `cacheComponents`,
+  `partialPrefetching`** as the shell's, and no `images` key of its own that differs from the shell's.
