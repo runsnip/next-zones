@@ -42,7 +42,8 @@ Each spike ends with its numbers and a verdict: it works, or exactly where in Ne
   - The switch takes **3.0–3.2 µs p50** (8.8–10.2 µs p95), with a 29-route zone in an app of 248 routes (75 of them
     dynamic). It is atomic.
   - Under load (32 concurrent clients, 18 swaps), no answer was wrong.
-- **Navigation.** `<Link>` is soft between any zones, client state is kept, and there is one React.
+- **Navigation.** `<Link>` is soft between any zones' App Router pages, client state is kept, and there is one React.
+  A zone's Pages Router pages render in documents of their own (Next's rule between the routers).
   - An open tab sees a swapped version at once (`<ZoneUpdates />`).
 - **Modules.** A module shared by the shell and the zones runs once, on the server and in the browser.
   - Concurrent renders across zones are safe.

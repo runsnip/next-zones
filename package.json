@@ -87,10 +87,12 @@
     "test:zones": "node spikes/zones/check-all.mjs",
     "test:upgrade": "node tools/upgrade-guard.mjs",
     "llms": "node tools/llms.mjs",
+    "site": "node tools/site.mjs",
     "build": "node tools/build-dist.mjs",
     "prepack": "node tools/build-dist.mjs"
   },
   "devDependencies": {
-    "@swc/core": "^1.16.13"
+    "@swc/core": "^1.16.13",
+    "markdown-it": "^15.0.2"
   }
 }

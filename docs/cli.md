@@ -154,7 +154,7 @@ with `1` on an error.
 | The declarations, as `check` | One shell, one owner per mount and alias segment |
 | One `next`, `react` and `react-dom` for every zone | Zones loads each once |
 | `basePath`, `i18n`, `trailingSlash`, `assetPrefix`, `skipTrailingSlashRedirect`, `cacheComponents`, `partialPrefetching` equal to the shell's | They shape every URL |
-| `images` equal to the shell's | The shell's image optimizer serves every zone |
+| No `images` key a zone sets of its own that differs from the shell's (a zone with none fits) | The shell's image optimizer serves every zone |
 | A zone's `headers`, `redirects` and `rewrites` under its mount or aliases | Root rules belong to the shell |
 | No `proxy`/`middleware` or `instrumentation-client` in a zone | They would not run when the zone is reached from the shell |
 | A zone's `app/` holds its mount, plus root files used alone (`layout`, `not-found`, `global-error`, `global-not-found`, `error`, `loading`, `template`, `default`, CSS) | Routes outside the mount are refused |
@@ -183,6 +183,9 @@ It composes the shell and every zone into one Next app, `<zones dir>/.zones-dev/
 **What it writes.** Nothing is copied: the app is made of links to the zones' own files, and Next sees every edit.
 - `app/`: the shell's `app/`, and each zone's `app/<mount>/` under its mount, as real folders of links to files.
   Next's route discovery does not enter linked folders.
+- `pages/`: each zone's Pages Router pages under its mount, re-exported (a stub per page: Turbopack's dev server does
+  not follow a linked page), and one `_app` and `_document`: a zone's own when only one has them, else composed ones
+  that render each page with its own zone's, picked by mount (see [Zones on the Pages Router](pages-router.md)).
 - `next.config.mjs`: the shell's config, with each zone's `transpilePackages`, `env`, `headers`, `redirects` and
   `rewrites` added, and the zones' aliases as rewrites.
 - `postcss.config.mjs`: the shell's, with Tailwind scanning the zones dir.

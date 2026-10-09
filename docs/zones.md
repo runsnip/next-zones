@@ -153,7 +153,8 @@ runs in parallel, and their switches take turns.
 
 ## What a user notices
 
-- **Nothing reloads.** `<Link>` between zones is soft, and client state is kept.
+- **Nothing reloads.** `<Link>` between zones' App Router pages is soft, and client state is kept. A zone's Pages
+  Router pages load in documents of their own ([Zones on the Pages Router](pages-router.md)).
 - **After a swap,** the next navigation renders the new version, its client code included. With
   [`<ZoneUpdates />`](updates.md) in the shell, that holds even for a static page the tab had cached.
 
@@ -177,6 +178,8 @@ All of App Router's routing (dynamic and catch-all routes, groups, parallel and 
 `error`, `not-found`), route handlers and metadata routes, server actions, prerendering, ISR and
 `generateStaticParams`, revalidation across zones, `next/font`, `next/image`, [public files](assets.md), the shell's
 `proxy.ts`, the zone's [routing rules](routing-rules.md), [aliases](aliases.md), [instrumentation](instrumentation.md).
+And the [Pages Router](pages-router.md): static pages, `getStaticProps`, `getServerSideProps`, its own `_app` and
+`_document`.
 
 See [What is supported](support.md) for the full list.
 

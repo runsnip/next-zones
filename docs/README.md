@@ -1,7 +1,7 @@
 # next-zones
 
 **Zones for Next.js.** Build each part of a product as its own Next app, a *zone*, with its own version. Serve them as
-one app: one origin, soft navigation between zones, one React. A new version of a zone can be loaded into the running
+one app: one origin, soft navigation between zones' App Router pages, one React. A new version of a zone can be loaded into the running
 server without a restart.
 
 > **Status: pre-release.** It targets Next.js **16.4.0** and **16.3.8** (and 16.3.6, 16.3.7), App Router and Pages Router, production server.
@@ -24,7 +24,7 @@ next-zones keeps the separation (each zone builds, versions and deploys on its o
 
 | | Next Multi-Zones | next-zones |
 |---|---|---|
-| Moving between zones | hard navigation | **soft** `<Link>` navigation; client state kept |
+| Moving between zones | hard navigation | **soft** `<Link>` navigation between App Router pages; client state kept |
 | Servers | one per zone | **one** for all zones |
 | A module shared by zones | loaded once per zone | loaded **once** |
 | Releasing a zone | redeploy its server | **install it live**, roll back in milliseconds |
