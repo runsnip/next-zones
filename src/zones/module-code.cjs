@@ -269,4 +269,86 @@ function remapRequires(source, requires, idMap) {
   return out + source.slice(at);
 }
 
-module.exports = { useParser, readModule, remapRequires };
+/* Calls that make no state of their own: what they return is a plain value, the same in every copy of a module. */
+const PURE = /^(Object\.(freeze|defineProperty|defineProperties|assign|create|keys|values|entries|fromEntries|getOwnPropertyNames|getPrototypeOf|setPrototypeOf)|Array\.(from|isArray|of)|Symbol\.for|JSON\.(parse|stringify)|String|Number|Boolean|parseInt|parseFloat)$/;
+
+/**
+ * Whether a factory may hold state of its own, which two copies of the module would not share: at its top level (not
+ * inside a function) a call or `new` whose value it keeps (createContext(), new Map(), Symbol()), a statement with an
+ * effect (window.x = …), or a top-level binding assigned again anywhere. Calls on the module context (e.i, e.s…) and
+ * PURE ones do not count. Conservative: a module it names may still be stateless (an icon made by a call), but one it
+ * does not name keeps nothing between calls. Returns the first reason, a short excerpt, or null.
+ */
+function holdsState(source) {
+  if (!acorn) throw new Error("next-zones: module-code.cjs has no parser (useParser)");
+  let ast;
+  try { ast = acorn.parseExpressionAt(source, 0, { ecmaVersion: "latest", sourceType: "script" }); } catch { return "unreadable"; }
+  if (!/Function/.test(ast.type)) return null;
+  const context = ast.params[0]?.type === "Identifier" ? ast.params[0].name : null;
+  const excerpt = (n) => source.slice(n.start, Math.min(n.end, n.start + 80));
+  /* A callee's name; `(0, Object.freeze)` (how bundlers call an import without its receiver) is Object.freeze. */
+  const calleeName = (c) => {
+    if (c.type === "SequenceExpression") c = c.expressions.at(-1);
+    return c.type === "Identifier" ? c.name : c.type === "MemberExpression" && !c.computed && c.object.type === "Identifier" ? `${c.object.name}.${c.property.name}` : null;
+  };
+  const onContext = (n) => n.type === "CallExpression" && n.callee.type === "MemberExpression" && n.callee.object.type === "Identifier" && n.callee.object.name === context;
+  /* A call or new outside any function, other than on the module context or PURE. */
+  const keptCall = (node) => {
+    let found = null;
+    const walk = (x) => {
+      if (!x || typeof x !== "object" || found || /Function/.test(x.type)) return;
+      if ((x.type === "CallExpression" || x.type === "NewExpression") && !onContext(x) && !PURE.test(calleeName(x.callee) ?? "")) { found = x; return; }
+      for (const k in x) if (k !== "start" && k !== "end") { const v = x[k]; if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === "object") walk(v); }
+    };
+    walk(node);
+    return found;
+  };
+  const body = ast.body.type === "BlockStatement" ? ast.body.body : [{ type: "ExpressionStatement", expression: ast.body }];
+  const top = new Set();
+  for (const st of body) {
+    if (st.type === "VariableDeclaration") {
+      for (const d of st.declarations) {
+        if (d.id.type === "Identifier") top.add(d.id.name);
+        const call = d.init && !onContext(d.init) && keptCall(d.init);
+        if (call) return excerpt(call);
+      }
+    } else if (st.type === "FunctionDeclaration" || st.type === "ClassDeclaration") {
+      if (st.id) top.add(st.id.name);
+    } else if (st.type === "ExpressionStatement") {
+      for (const part of st.expression.type === "SequenceExpression" ? st.expression.expressions : [st.expression]) {
+        if (onContext(part) || (part.type === "Literal" && typeof part.value === "string")) continue;    // e.s([…]), "use strict"
+        if (part.type === "CallExpression" && PURE.test(calleeName(part.callee) ?? "")) continue;       // Object.defineProperty(f, …)
+        return excerpt(part);
+      }
+    } else if (st.type !== "EmptyStatement") return excerpt(st);
+  }
+  /* A function's own names (its parameters and declarations, not its inner functions'): they hide the top-level ones. */
+  const ownNames = (fn) => {
+    const names = new Set();
+    const bind = (p) => { if (!p) return; if (p.type === "Identifier") names.add(p.name); else if (p.type === "AssignmentPattern") bind(p.left); else if (p.type === "RestElement") bind(p.argument); else if (p.type === "ArrayPattern") p.elements.forEach(bind); else if (p.type === "ObjectPattern") p.properties.forEach((q) => bind(q.value ?? q.argument)); };
+    fn.params.forEach(bind);
+    if (fn.id && fn.type === "FunctionExpression") names.add(fn.id.name);
+    const scan = (x) => {
+      if (!x || typeof x !== "object") return;
+      if (x.type === "VariableDeclarator") bind(x.id);
+      if ((x.type === "FunctionDeclaration" || x.type === "ClassDeclaration") && x.id) names.add(x.id.name);
+      if (x.type === "CatchClause") bind(x.param);
+      if (/Function/.test(x.type) && x !== fn) return;
+      for (const k in x) if (k !== "start" && k !== "end") { const v = x[k]; if (Array.isArray(v)) v.forEach(scan); else if (v && typeof v === "object") scan(v); }
+    };
+    scan(fn.body);
+    return names;
+  };
+  let reassigned = null;
+  const walk = (x, hidden) => {
+    if (!x || typeof x !== "object" || reassigned) return;
+    if (/Function/.test(x.type) && x !== ast) hidden = new Set([...hidden, ...ownNames(x)]);
+    const target = x.type === "AssignmentExpression" ? x.left : x.type === "UpdateExpression" ? x.argument : null;
+    if (target?.type === "Identifier" && top.has(target.name) && !hidden.has(target.name)) { reassigned = x; return; }
+    for (const k in x) if (k !== "start" && k !== "end") { const v = x[k]; if (Array.isArray(v)) v.forEach((e) => walk(e, hidden)); else if (v && typeof v === "object") walk(v, hidden); }
+  };
+  walk(ast.body, new Set());
+  return reassigned ? excerpt(reassigned) : null;
+}
+
+module.exports = { useParser, readModule, remapRequires, holdsState };

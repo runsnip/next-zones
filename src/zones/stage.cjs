@@ -166,7 +166,7 @@ function createStaging(ctx) {
     await fs.promises.rename(temp, file);
   }
 
-  const ANALYSIS = "m10";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
+  const ANALYSIS = "m11";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
   async function analyseZoneClient(staged) {
     const fingerprint = crypto.createHash("sha1").update(JSON.stringify([ANALYSIS, ctx.clientKnown ? [...ctx.clientKnown].map(([id, h]) => [id, [...h].sort()]).sort() : "shell"])).digest("hex").slice(0, 12);
     const base = path.join(ctx.cacheDir, staged.name, `${staged.buildKey}--${fingerprint}`);
@@ -182,6 +182,12 @@ function createStaging(ctx) {
          different project roots (every module named otherwise) and would share nothing. */
       if (result.shared && result.shared.sameCode >= 10 && result.shared.sameId < result.shared.sameCode / 2) {
         throw new ZoneError(`zone "${staged.name}" ${staged.version ?? ""} was built from another project root than the shell: of the ${result.shared.sameCode} client modules it has in common with the shell, ${result.shared.sameId} are under the same ids, so it would load a second copy of each (React's contexts among them). Build the shell and the zone with next-zones build from the same workspace (it pins the root; NEXT_ZONES_ROOT sets it)`);
+      }
+      if (result.statefulConflicts?.length) {
+        const list = result.statefulConflicts.slice(0, 5).map((c) => `module ${c.id} (${c.reason})`).join("; ");
+        const message = `zone "${staged.name}": ${result.statefulConflicts.length} client module(s) the shell also has differ in the zone and may hold state, so the zone gets its own copy of each and does not see what the shell set up in it (a context's provider, a client): ${list}. Build the shell and the zone against the same versions of their packages`;
+        if (ctx.options.strictModules) throw new ZoneError(message);
+        result.warnings = [...(result.warnings ?? []), message];
       }
       if (result.missingUsed.length) {
         throw new ZoneError(`zone "${staged.name}" uses client runtime features the shell's runtime lacks (${result.missingUsed.join(", ")}): import @runsnip/next-zones/client in the shell (render <ZoneUpdates />), which gives its runtime every feature, and rebuild the shell`);
@@ -203,7 +209,9 @@ function createStaging(ctx) {
       mainChunks: result.mainChunks, mainChunkFile: result.mainChunkFile, idMap: result.idMap, chunkDir: `${base}-chunks`,
       chunkUrls: Object.fromEntries(Object.entries(result.chunkMap).map(([from, to]) => [`/_next/${from}`, `/_next/${to}`])),
       zoneModules: result.zoneModules, cacheDir: `${staged.cacheDir}--${fingerprint}`, analysisFiles: [resultFile, `${base}-chunks`, result.mainChunkFile].filter(Boolean),
+      warnings: result.warnings ?? [],
     });
+    for (const warning of staged.warnings) console.warn(`next-zones: ${warning}`);
   }
 
   /* The prerendered outputs of the zone's routes, with the shell's build id and the zone's main chunk, written to a

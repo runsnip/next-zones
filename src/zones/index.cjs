@@ -74,6 +74,8 @@ process.once("exit", () => { if (claimed) releaseStore(claimed); });
  * @param {boolean} [options.persist]   default true: state.json keeps the active versions across restarts
  * @param {object} [options.policy]     instrumentation policy: { instrumentation: { shell: { skip }, own } }
  * @param {string} [options.adminToken] required by the admin endpoints (install, policy) unless the request is local
+ * @param {boolean} [options.strictModules] refuse a zone whose client modules differ from the shell's copies of them and may
+ *                                       hold state (two copies of a context); by default, the install reports them in warnings
  * @param {boolean} [options.debug]     enables <base>/debug and <base>/bench (with endpoints declared)
  * @param {boolean} [options.scopedLoaders]  default true (turned off only to measure what it fixes)
  * @param {boolean} [options.moduleRegistry] default true (idem)

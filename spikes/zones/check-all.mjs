@@ -68,7 +68,7 @@ const SETUP = {
 /* Checks slower than 2 minutes: init installs a new workspace from the registry, then runs doctor and next dev
    (2 min 46 s measured); release builds a shell and three zone images; single builds one app and three apps. */
 const TIMEOUT = { init: 360_000, release: 600_000, single: 600_000, ownhandler: 300_000 };
-const EXPECTED = /boom|broken on purpose|NoFallbackError|metadataBase|Running next\.config|Zones on :3900|next-zones: pruned|digest|^\s*at |^\s*[{}]|^\s*$/i;
+const EXPECTED = /may hold state|boom|broken on purpose|NoFallbackError|metadataBase|Running next\.config|Zones on :3900|next-zones: pruned|digest|^\s*at |^\s*[{}]|^\s*$/i;
 const chosen = process.argv.slice(2).length ? process.argv.slice(2) : CHECKS;
 /* The spike installs the package as a copy (install-links: Turbopack refuses a link out of its root), so the copy
    is brought up to date with src/ first: the zones' next.config and the shell import it. */

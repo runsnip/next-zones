@@ -26,7 +26,7 @@ const crypto = require("node:crypto");
 const { dist, shellDist, known: knownIn, outDir, buildKey, urlPrefix, readCache } = workerData;
 const isRuntime = (f) => /(^|[\\/])turbopack-[^/]*\.js$/.test(f);
 const { createRequire } = require("node:module");
-const { useParser, readModule, remapRequires } = require("./module-code.cjs");
+const { useParser, readModule, remapRequires, holdsState } = require("./module-code.cjs");
 /* Every module factory is read with a parser (module-code.cjs): Next's own acorn, from the shell. */
 useParser(createRequire(path.join(shellDist, "..", "package.json"))("next/dist/compiled/acorn"));
 const sha = (text) => crypto.createHash("sha1").update(text).digest("base64");
@@ -199,6 +199,13 @@ const shared = { sameCode: 0, sameId: 0 };
 /* 1–2. Conflicts, spread to the importers the browser may hold. */
 const conflicting = new Set();
 for (const [id, h] of zoneIds) if (!aliases.has(id) && known.has(id) && !known.get(id).has(h)) conflicting.add(id);
+/* A conflict is a module the browser may hold another copy of (another version of a package, say): the zone gets its
+   own. Harmless for a module without state; one with state (a context, a singleton) then exists twice, and what the
+   shell set up in it (a provider, a client) is not what the zone reads. Those are reported (stage.cjs). */
+const statefulConflicts = [...conflicting].flatMap((id) => {
+  const reason = holdsState(groupOf.get(id).source);
+  return reason ? [{ id, reason }] : [];
+});
 const importers = new Map();
 for (const [id, g] of groupOf) for (const dep of requiredBy(g)) (importers.get(dep) ?? importers.set(dep, new Set()).get(dep)).add(id);
 const queue = [...conflicting];
@@ -309,5 +316,5 @@ const shellRuntimeFile = shellBuild.rootMainFiles?.find(isRuntime);
   const zoneModules = {};
   for (const [id, h] of zoneIds) (zoneModules[idMap[id] ?? id] ??= []).push(h);
   saveReads();
-  parentPort.postMessage({ idMap, chunkMap, mainSource, shared, missingUsed, zoneModules, shellModules });
+  parentPort.postMessage({ idMap, chunkMap, mainSource, shared, statefulConflicts, missingUsed, zoneModules, shellModules });
 })().catch((error) => setImmediate(() => { throw error; }));

@@ -28,6 +28,9 @@ declare namespace nextZonesZones {
     policy?: { instrumentation?: { shell?: { skip?: string[] }; own?: Record<string, boolean> } };
     /** Required by the admin endpoints unless the request is local. */
     adminToken?: string;
+    /** Refuse a zone whose client modules differ from the shell's copies of them and may hold state (two copies of a
+        context); by default the install reports them in `warnings`. */
+    strictModules?: boolean;
     /** Enables <base>/debug and <base>/bench (with endpoints declared). */
     debug?: boolean;
     scopedLoaders?: boolean;

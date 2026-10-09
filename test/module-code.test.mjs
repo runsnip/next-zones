@@ -74,3 +74,22 @@ test("re-exports (e.S, Next 16.4) require the module heading each group, and are
   assert.ok(same(source, `e=>{e.i(1),e.S([2,"Counter,Counter",0,3,"a","b",0,n,"x","y"])}`));
   assert.ok(!same(source, `e=>{e.i(55863),e.S([25098,"Counter,Other",0,7,"a","b",0,n,"x","y"])}`));
 });
+
+test("holdsState names a module with state of its own, and not a stateless one", { skip }, () => {
+  const { holdsState } = require("../src/zones/module-code.cjs");
+  for (const stateful of [
+    `e=>{var t=e.i(71645);let r=(0,t.createContext)("none");e.s(["f",0,function(){return r}])}`,
+    `e=>{let i=new Map();e.s(["get",0,(k)=>i.get(k)])}`,
+    `e=>{let n=0;e.s(["next",0,()=>++n])}`,
+    `e=>{window.__count=(window.__count??0)+1,e.s(["x",0,1])}`,
+    `t=>{let i=Symbol();e.s(["k",0,i])}`,
+  ]) assert.ok(holdsState(stateful), stateful);
+  for (const stateless of [
+    `e=>{var t=e.i(43476);e.s(["f",0,function(e){let n=0;n++;return(0,t.jsx)("p",{children:n})}])}`,
+    `e=>{"use strict";let a=Object.freeze({x:1});e.s(["a",0,a])}`,
+    `e=>{e.S([25098,"Counter,Counter"])}`,
+    `e=>{let i=Symbol.for("next.x");e.s(["k",0,i])}`,
+    `e=>{let i=1;function f(i){i=2;return i}e.s(["f",0,f])}`,
+    `e=>{function f(){}(0,Object.defineProperty)(f,"name",{value:"g"});e.s(["f",0,f])}`,
+  ]) assert.equal(holdsState(stateless), null, stateless);
+});

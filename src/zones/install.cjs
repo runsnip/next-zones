@@ -60,7 +60,7 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
     });
     loop.disable();
     /* How long the install kept the event loop from serving requests, at most. */
-    return { name, version: staged.version, routes: staged.routes, ms: +(t.stage + t.activate).toFixed(3), blockedMs: +(loop.max / 1e6).toFixed(1), t };
+    return { name, version: staged.version, routes: staged.routes, ms: +(t.stage + t.activate).toFixed(3), blockedMs: +(loop.max / 1e6).toFixed(1), t, ...(staged.warnings?.length ? { warnings: staged.warnings } : {}) };
   }
 
   /* ── the store's state: which version of each zone is active ──────────────────────────────────────────────────
