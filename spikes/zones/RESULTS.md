@@ -981,3 +981,32 @@ modules that hold state, found from their syntax tree, if that can be shown to m
 the zone's ids are longer than the shell's (6 and 5 digits); a soft navigation from the shell and a direct load read
 the shell's context; the shared server module is evaluated once. Without the aliases, the soft navigation never
 renders.
+
+## D8: keeping whole only the modules that may hold state (tried, stopped)
+
+**What was tried:** unused exports removed in every build, and every client module of the shell that may hold state
+(`holdsState`) kept whole in every build: a module of the shared root layout, never loaded, `import()`s each of
+them, so the bundler counts all their exports as used (checked first on the bed: one module kept so, the context
+check passes). The modules were found by building the shell once with source maps (`turbopackInputSourceMaps` off,
+or the maps name a package's original `src/`): 242 of its 410 client modules may hold state, 155 of them Next's own
+(CommonJS, never trimmed, so not kept), the shell's own (its `@/` alias is another folder in a zone) left out: 82
+files kept.
+
+**Measured** (the same 16 pages as above, the JavaScript a page loads when opened, gzipped, summed):
+
+| | sum | against today |
+|---|---|---|
+| today (unused exports kept) | 4273.8 KB | — |
+| unused exports removed, the 82 modules kept whole | 4199.8 KB | −1.7% |
+| unused exports removed (the target, not shareable) | 4044.6 KB | −5.4% |
+
+- **32% of the gap recovered**, most of it on one zone's editor page (376.6 → 359.1 KB); 1–2% on most pages.
+- **Not exact:** modules that may hold state still differed between the shell and a zone (a context module of the
+  UI primitives, a `createContextScope` call): about a tenth of the modules map to no source, and keeping a file
+  whole does not decide how the re-exports around it are trimmed.
+
+**The bottleneck:** Turbopack has one switch for removing unused exports, for a whole build. There is no way to say
+"keep every export of this module" or "of this package", which is what sharing modules across separately built
+apps needs; using the exports from outside recovers a third of the cost and cannot be shown complete. The next step
+is upstream: a per-package (or per-module) setting to keep exports, or trimming to the union of what the builds
+use. Until then a build for Zones keeps every export (D8 as it was): 5–8% of a page's JavaScript.
