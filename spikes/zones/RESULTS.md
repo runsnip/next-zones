@@ -881,8 +881,19 @@ during swaps, `/blog` answered 500 (4 to 136 times per run, in 4 runs of 6), wit
 - **`partialPrefetching`** is warned about when `cacheComponents` is on without it. It decides how the client router
   prefetches, so a zone must set it as the shell does, like `cacheComponents` (`stage.cjs`, `doctor`).
 
-**Not measured yet:** the cost of 16.4's per-request route matching (definitions rebuilt and dynamic routes sorted on
-each call) against 16.3's matchers, with the 2036-route app of `activation.mjs`.
+**16.4's route matching, measured and fixed.** 16.4 rebuilds every route definition, and sorts the dynamic ones, on
+each request. Measured with `tools/bench/latency.mjs` (1500 sequential requests per path after 200, two rounds
+alternating the beds, load average 5–9) before and after `tools/bench/activation.mjs --pad 2000 --dynamic 700`:
+
+| p50 of a dynamic route (`/blog/42`) | before padding | 2000 routes, 700 dynamic |
+|---|---|---|
+| 16.3.8 (route matchers) | 3.1 ms | 2.8–4.6 ms |
+| 16.4.0 as Next has it | 3.0–3.1 ms | **10.5–10.6 ms** |
+| 16.4.0, Zones keeping the definitions | 2.9 ms | 3.7–4.1 ms |
+
+Static routes and 404s were unchanged. The definitions only change when the manifests they come from do, and Zones
+assigns new ones at every switch: on 16.4 Zones keeps them per manifest objects, split and sorted once, and matches
+in Next's own order (`hooks.cjs`).
 
 ## A .zip read as it arrives
 

@@ -171,6 +171,34 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
       ctx.servers.add(this);
       return getAppPathRoutes.call(this);
     };
+    /* 16.4 rebuilds every route definition, and sorts the dynamic ones, on each match: at a real app's size (2000
+       routes, 700 dynamic) a dynamic route's request took 10.5 ms at p50, against 2.8–4.6 ms on 16.3. The definitions
+       only change when the manifests they come from do, and Zones assigns new ones at every switch: they are kept
+       per manifest objects, split and sorted once, and matched in Next's own order (exact routes in definition order,
+       then the dynamic ones by specificity). */
+    const { isDynamicRoute } = ctx.requireNext("next/dist/shared/lib/router/utils");
+    const getRouteDefinitions = NextNodeServer.prototype.getRouteDefinitions;
+    const routeTables = new WeakMap();                    // server → { pages, routes, paths, defs, exact, dynamic }
+    const tableOf = (server) => {
+      let t = routeTables.get(server);
+      if (!t || t.pages !== server.pagesManifest || t.routes !== server.appPathRoutes || t.paths !== server.appPathsManifest) {
+        const defs = getRouteDefinitions.call(server);
+        const dynamic = defs.filter((d) => isDynamicRoute(d.pathname));
+        t = { pages: server.pagesManifest, routes: server.appPathRoutes, paths: server.appPathsManifest, defs,
+          exact: defs.filter((d) => !isDynamicRoute(d.pathname)), dynamic: server.getSortedRouteDefinitions(dynamic) };
+        routeTables.set(server, t);
+      }
+      return t;
+    };
+    NextNodeServer.prototype.getRouteDefinitions = function () { return tableOf(this).defs; };
+    NextNodeServer.prototype.getRouteMatch = function (pathname, localeAnalysisResult) {
+      const t = tableOf(this);
+      if (!isDynamicRoute(pathname)) {
+        for (const definition of t.exact) { const match = this.testRouteDefinition(pathname, definition, localeAnalysisResult); if (match) return match; }
+      }
+      for (const definition of t.dynamic) { const match = this.testRouteDefinition(pathname, definition, localeAnalysisResult); if (match) return match; }
+      return null;
+    };
   }
 
   /* The incremental cache's files. The page runtime is bundled with its own FileSystemCache, out of reach, so Zones
