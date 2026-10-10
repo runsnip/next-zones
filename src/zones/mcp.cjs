@@ -165,7 +165,7 @@ function createMcp(ctx, declared, zones, { fetchImpl } = {}) {
   const base = ctx.endpoints?.base ?? "/_next-zones";
   const mcpPath = declared.path ?? `${base}/mcp`;
   const metadataPath = `/.well-known/oauth-protected-resource${mcpPath}`;
-  const auth = createAuth(ctx, declared.auth, { fetchImpl });
+  const auth = createAuth(ctx, declared.auth, { fetchImpl, jwks: declared.jwks });
   /* What a tool's handler may do with Zones: the same as the admin URLs, a pull on request needing the zone's livePull. */
   const api = {
     status: () => zones.status(),

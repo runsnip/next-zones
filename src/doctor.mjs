@@ -213,6 +213,11 @@ export async function doctor({ dirs, store, url, fast = false, print = console.l
         const shellAppDir = routerDir(z.dir, "app");
         if (shellAppDir && fs.existsSync(path.join(shellAppDir, first)) && !first.startsWith("_")) fail(z.name, `its MCP server's path ${mcpPath} is under its own app/${first}`, "give Mcp({ path }) a segment no route serves");
         if (zones.some((o) => o !== z && o.mount === `/${first}`)) fail(z.name, `its MCP server's path ${mcpPath} is under zone ${zones.find((o) => o.mount === `/${first}`).name}'s mount`, "give Mcp({ path }) another segment");
+        /* OAuth checks tokens with @runsnip/jwks, an optional peer: installed where the shell resolves it, unless
+           Mcp({ jwks }) gives another implementation. */
+        if ((z.mcp.auth ?? []).some((a) => a.scheme === "oauth") && !z.mcp.jwks && !packageDir(z.dir, "@runsnip/jwks")) {
+          fail(z.name, "its MCP server declares OAuth(…), which checks tokens with @runsnip/jwks, not installed here", "npm install @runsnip/jwks (an optional peer of next-zones), or give another implementation as Mcp({ jwks })");
+        }
         for (const a of z.mcp.auth ?? []) {
           if (a.scheme === "bearer" && a.env && !process.env[a.env] && !a.tokens.length && !a.verify) warn(z.name, `its MCP server's Bearer({ env: "${a.env}" }): ${a.env} is not set here`, `set ${a.env} where Zones runs: Zones refuses to start without it`);
         }

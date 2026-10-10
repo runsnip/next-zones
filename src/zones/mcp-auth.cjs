@@ -2,7 +2,8 @@
 /*
  * Who may call Zones' MCP server (zones/mcp.cjs), from Mcp({ auth }) (../mcp.cjs):
  * - Bearer: static tokens (compared in constant time) or a verify function of the owner's;
- * - OAuth: the MCP authorization spec's resource server, with @runsnip/jwks. A JWT access token is checked against the
+ * - OAuth: the MCP authorization spec's resource server, with @runsnip/jwks (an optional peer dependency) or another
+ *   implementation of its contract given as Mcp({ jwks }). A JWT access token is checked against the
  *   issuer's key set (found from its metadata, kept, fetched again for a key rotated in): signature, iss, aud (this
  *   server), exp and nbf (60 s of leeway), scopes. With introspection, any token the issuer confirms active (RFC 7662).
  *   A request without a valid token gets 401 and WWW-Authenticate pointing at the protected resource metadata
@@ -31,7 +32,16 @@ function fromJwks(error, requiredScopes) {
  * The server's authentication.
  * @returns {{ authenticate(req, resource): Promise<object>, metadata(resource): object|null, challenge(metadataUrl, error): string }}
  */
-function createAuth(ctx, declared, { fetchImpl } = {}) {
+/* What checks OAuth tokens: Mcp({ jwks }), else @runsnip/jwks, installed beside next-zones. */
+function jwksOf(given) {
+  if (given) return given;
+  try { return require("@runsnip/jwks"); } catch (error) {
+    if (error?.code !== "MODULE_NOT_FOUND" && error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
+    throw new Error("next-zones mcp: OAuth(…) checks tokens with @runsnip/jwks, which is not installed: npm install @runsnip/jwks, or give another implementation as Mcp({ jwks })");
+  }
+}
+
+function createAuth(ctx, declared, { fetchImpl, jwks: given } = {}) {
   const isLocal = (req) => ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress);
   const methods = (declared ?? []).map((a) => {
     if (a.scheme === "bearer") {
@@ -46,9 +56,10 @@ function createAuth(ctx, declared, { fetchImpl } = {}) {
         return null;
       } };
     }
-    /* @runsnip/jwks, loaded only for OAuth. A verifier per audience: the declared one, or the server's canonical URL
-       (one unless a proxy changes the host a request names). */
-    const jwks = require("@runsnip/jwks");
+    /* @runsnip/jwks (or Mcp({ jwks })), loaded only for OAuth. A verifier per audience: the declared one, or the server's
+       canonical URL (one unless a proxy changes the host a request names). */
+    const jwks = jwksOf(given);
+    if (a.introspection && typeof jwks.introspectAccessToken !== "function") throw new Error("next-zones mcp: OAuth({ introspection }) needs introspectAccessToken in Mcp({ jwks })");
     const fetchOption = fetchImpl ? { fetch: fetchImpl } : {};
     const verifiers = new Map();
     const verifierFor = (audience) => {

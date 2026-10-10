@@ -180,3 +180,33 @@ test("skills: resources and prompts", async () => {
     assert.match(prompt.body.result.messages[0].content.text, /# Release/);
   } finally { await s.close(); }
 });
+
+test("OAuth with another implementation of @runsnip/jwks' contract, given as Mcp({ jwks })", async () => {
+  const seen = [];
+  const jwks = {
+    createAccessTokenVerifier(options) {
+      seen.push(options);
+      return async (token) => {
+        if (token === "x.y.good") return { payload: { sub: "carol" }, scopes: ["zones:read"], subject: "carol" };
+        if (token === "x.y.scope") throw Object.assign(new Error("the token lacks the scopes zones:read"), { code: "ERR_JWT_CLAIM", claim: "scope" });
+        throw Object.assign(new Error("the signature does not verify"), { code: "ERR_JWS_SIGNATURE" });
+      };
+    },
+  };
+  assert.throws(() => Mcp({ tools: Tools(LivePull()), jwks: { verify() {} } }), /createAccessTokenVerifier/);
+  /* Introspection with an implementation that has none: refused when the server is made. */
+  await assert.rejects(serve(Mcp({ tools: Tools(LivePull()), auth: OAuth({ issuer: "https://auth.example.com", introspection: { url: "https://auth.example.com/introspect" } }), jwks })), /needs introspectAccessToken/);
+  const s = await serve(Mcp({ url: "https://zones.example.com/_next-zones/mcp", tools: Tools(LivePull({ tools: ["status"] })), auth: OAuth({ issuer: "https://auth.example.com", scopes: ["zones:read"] }), jwks }));
+  try {
+    const ping = (token) => s.rpc("ping", {}, { authorization: `Bearer ${token}` });
+    assert.equal((await ping("x.y.good")).status, 200);
+    const scope = await ping("x.y.scope");
+    assert.equal(scope.status, 403);
+    assert.match(scope.headers.get("www-authenticate"), /insufficient_scope/);
+    assert.equal((await ping("x.y.bad")).status, 401);
+    assert.equal((await ping("not-a-jwt")).status, 401);
+    /* The verifier it built is the given one's, with the issuer, the audience (the canonical URL) and the scopes. */
+    const options = seen.at(-1);
+    assert.deepEqual([options.issuer, options.audience, options.scopes], ["https://auth.example.com", "https://zones.example.com/_next-zones/mcp", ["zones:read"]]);
+  } finally { await s.close(); }
+});

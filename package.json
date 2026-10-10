@@ -23,9 +23,6 @@
   "publishConfig": {
     "access": "public"
   },
-  "peerDependencies": {
-    "next": "16.3.6 || 16.3.7 || 16.3.8 || 16.4.0"
-  },
   "engines": {
     "node": ">=24"
   },
@@ -97,10 +94,17 @@
     "build": "node tools/build-dist.mjs",
     "prepack": "node tools/build-dist.mjs"
   },
-  "dependencies": {
+  "peerDependencies": {
+    "next": "16.3.6 || 16.3.7 || 16.3.8 || 16.4.0",
     "@runsnip/jwks": "^0.1.0"
   },
+  "peerDependenciesMeta": {
+    "@runsnip/jwks": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@runsnip/jwks": "^0.1.0",
     "@swc/core": "^1.16.13",
     "markdown-it": "^15.0.2"
   }

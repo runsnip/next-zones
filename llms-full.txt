@@ -32,7 +32,7 @@ These are the facts an assistant most often gets wrong. Each is detailed in the 
 - **The Pages Router works** (every mode): a zone's pages live in `pages/<mount>/…`, its own `_app` and `_document` at the top of `pages/`. Each Pages Router page renders whole in its zone's build (its document, build id, chunks): soft navigation inside the zone keeps `_app` state; going to another zone, or between the App Router and the Pages Router, loads a new document (Next's rule). `getStaticProps`, `getStaticPaths` (with `fallback`, `revalidate`) and `getServerSideProps` work.
 - **A 404 under a zone's mount is the zone's own** (every mode): a URL there that nothing serves, or a page answering `notFound`, gets the zone's `app/not-found` (with an `app/` folder; Next never shows `pages/404` then) or its `pages/404`/`_error` (only `pages/`), as when the zone runs alone; a zone without one, and every URL outside the zones, get the shell's.
 - **Open tabs follow a new version** when the shell renders `<ZoneUpdates />` from `@runsnip/next-zones/client` and declares `endpoints: { events: true }`; a Pages Router zone renders it in its own `_app` too.
-- **MCP:** the shell's `zoneConfig({ mcp: Mcp({ tools: Tools(LivePull(), Metrics(), Tool({ name, description, input, handler })), skills: Skills(…), auth: [Bearer({ env }), OAuth({ issuer })] }) })` (from `@runsnip/next-zones/mcp`) makes Zones an MCP server at `/_next-zones/mcp`, whatever `endpoints` are declared (all off included). Zones' own tools (`zones_status`, `zones_images`, `zones_pull`, `zones_install`, `zones_metrics`) are optional; your `Tool(…)`s reach Zones only as far as their `zones: ["read" | "pull" | "install" | "prune"]` declares. A pull on request needs the zone's `livePull`. No `auth`: the admin rule. Tools run in Zones' process: run untrusted code elsewhere. Zones only (not mode `"single"`).
+- **MCP:** the shell's `zoneConfig({ mcp: Mcp({ tools: Tools(LivePull(), Metrics(), Tool({ name, description, input, handler })), skills: Skills(…), auth: [Bearer({ env }), OAuth({ issuer })] }) })` (from `@runsnip/next-zones/mcp`) makes Zones an MCP server at `/_next-zones/mcp`, whatever `endpoints` are declared (all off included). Zones' own tools (`zones_status`, `zones_images`, `zones_pull`, `zones_install`, `zones_metrics`) are optional; your `Tool(…)`s reach Zones only as far as their `zones: ["read" | "pull" | "install" | "prune"]` declares. A pull on request needs the zone's `livePull`. No `auth`: the admin rule. `OAuth(…)` needs `@runsnip/jwks` (an optional peer dependency) or another implementation of its contract as `Mcp({ jwks })`. Tools run in Zones' process: run untrusted code elsewhere. Zones only (not mode `"single"`).
 - **Metrics:** the shell's `metrics: true` opens one store for the process, read as Prometheus text at `/_next-zones/metrics` by an admin. `metrics: true` alone opens that URL: no `endpoints` declaration is needed. A zone's code measures with `counter`, `gauge`, `histogram` and `time` from `@runsnip/next-zones/metrics`; with metrics off they do nothing.
 - **Developing:** `next-zones dev <zones dir>` runs every zone in one `next dev`, with HMR and soft navigation. `next-zones doctor <dir>` checks a workspace and says what to fix.
 - **Entry points:** `@runsnip/next-zones/config` (`zoneConfig`, `readZone`), `/client` (`ZoneUpdates`), `/zones` (`createZones`), `/build`, `/sources` (`fromDirectory`, `fromHttp`, `fromConnector`, `packZoneImage`), `/metrics`, `/mcp` (`Mcp`, `Tools`, `Tool`, `LivePull`, `Metrics`, `Skills`, `Skill`, `NextZonesSkill`, `Bearer`, `OAuth`), `/tsconfig/zone.json`; the `next-zones` command.
@@ -614,7 +614,7 @@ with `1` on an error.
 | A path alias that differs between zones has the form `"prefix/*": ["folder/*"]` | The form `dev` gives each zone |
 | `.next/`, `node_modules/`, `.zones-dev/`, `.zones-store/`, `.zones-images/`, `.zones-cache/`, `.zones-app/`, `.zones-export/` ignored by git (errors); `next-env.d.ts`, `*.tsbuildinfo` (warnings) | Asked of git itself (`git check-ignore`), so any `.gitignore` in the repository, or a global one, counts |
 | **Next's and React's checks** (not with `--fast`): `eslint-config-next`'s rules on each zone's sources, or the zone's own ESLint config; then `next typegen` and `tsc --noEmit` | Neither Next nor React ships a doctor. These are their official checks: Next's plugin, React's hooks and compiler rules, and the type check `next build` runs. They run from the workspace's installs (`eslint` 9, `eslint-config-next`, `typescript`); nothing is downloaded |
-| The shell's MCP server (`zoneConfig({ mcp })`): `Metrics()` with metrics on; its path under no route of the shell and no zone's mount (errors); a `Bearer({ env })` whose variable is set, not mode `"single"` (warnings) | Zones refuses to start otherwise |
+| The shell's MCP server (`zoneConfig({ mcp })`): `Metrics()` with metrics on; its path under no route of the shell and no zone's mount; `@runsnip/jwks` installed for `OAuth(…)`, unless `Mcp({ jwks })` (errors); a `Bearer({ env })` whose variable is set, not mode `"single"` (warnings) | Zones refuses to start otherwise |
 | With `--store`: the versions `state.json` and `zones.json` pin are in the store, built with the shell's Next and React, and whole as built (their integrity, as Zones checks it) | Zones refuses them otherwise |
 | With `--url`: a Zones answers at that URL (a warning when it does not) | |
 
@@ -1446,6 +1446,8 @@ export default zoneConfig({
   server.
 - **Light.** The transport and the JSON-RPC are next-zones' own; OAuth tokens are checked with
   [`@runsnip/jwks`](https://github.com/runsnip/jwks), which has no dependency of its own (see [the numbers](#the-numbers)).
+  It is an optional peer dependency: install it (`npm install @runsnip/jwks`) only to use `OAuth(…)`, or give another
+  implementation as `Mcp({ jwks })` ([below](#another-token-checker)).
 
 ## Tools
 
@@ -1549,6 +1551,23 @@ token (`NEXT_ZONES_ADMIN_TOKEN`) as a bearer token, or, when none is set, a requ
 A tool's `scopes` (and `LivePull({ scopes })`) apply to OAuth callers, and to a `Bearer({ verify })` that returns
 scopes; a static token and the admin rule have every scope.
 
+### Another token checker
+
+`OAuth(…)` checks tokens with `@runsnip/jwks` by default. `Mcp({ jwks })` gives another implementation of its contract:
+an object with `createAccessTokenVerifier(options)` (and `introspectAccessToken(token, options)` for introspection).
+
+```js
+import * as myJwks from "./auth/jwks.mjs";
+
+mcp: Mcp({ tools, auth: OAuth({ issuer: "https://auth.example.com" }), jwks: myJwks }),
+```
+
+- `createAccessTokenVerifier({ issuer, audience, scopes, clockToleranceS, jwksUri, algorithms })` returns
+  `(token) => Promise<{ subject, scopes, payload }>`; `introspectAccessToken(token, { endpoint, clientId,
+  clientSecret, issuer, audience, scopes })` returns the same.
+- A refusal throws an error with `@runsnip/jwks`' codes: `ERR_JWT_CLAIM` with `claim: "scope"` is answered 403
+  (`insufficient_scope`); `ERR_JWKS_FETCH`, `ERR_DISCOVERY` and `ERR_INTROSPECTION` 500; any other, 401.
+
 **From a browser,** a request whose `Origin` is not the server's own is refused (403), against DNS rebinding;
 `Mcp({ origins })` allows others.
 
@@ -1575,8 +1594,9 @@ With metrics on, each call is counted: `nextzones_mcp_calls_total{tool, outcome}
   with Next's own `@vercel/nft`), and the skill folders; `zones.js` reads the MCP server from there.
 - **`createZones({ mcp })`** gives or replaces it from code; `mcp: false` turns it off.
 
-`next-zones doctor` checks the declaration: `Metrics()` without `metrics: true`, a path a route or a zone serves, a
-`Bearer({ env })` whose variable is not set, mode `"single"`.
+`next-zones doctor` checks the declaration: `Metrics()` without `metrics: true`, a path a route or a zone serves,
+`OAuth(…)` without `@runsnip/jwks` installed (nor `Mcp({ jwks })`), a `Bearer({ env })` whose variable is not set, mode
+`"single"`.
 
 ## The numbers
 

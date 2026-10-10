@@ -28,6 +28,8 @@ export default zoneConfig({
   server.
 - **Light.** The transport and the JSON-RPC are next-zones' own; OAuth tokens are checked with
   [`@runsnip/jwks`](https://github.com/runsnip/jwks), which has no dependency of its own (see [the numbers](#the-numbers)).
+  It is an optional peer dependency: install it (`npm install @runsnip/jwks`) only to use `OAuth(…)`, or give another
+  implementation as `Mcp({ jwks })` ([below](#another-token-checker)).
 
 ## Tools
 
@@ -131,6 +133,23 @@ token (`NEXT_ZONES_ADMIN_TOKEN`) as a bearer token, or, when none is set, a requ
 A tool's `scopes` (and `LivePull({ scopes })`) apply to OAuth callers, and to a `Bearer({ verify })` that returns
 scopes; a static token and the admin rule have every scope.
 
+### Another token checker
+
+`OAuth(…)` checks tokens with `@runsnip/jwks` by default. `Mcp({ jwks })` gives another implementation of its contract:
+an object with `createAccessTokenVerifier(options)` (and `introspectAccessToken(token, options)` for introspection).
+
+```js
+import * as myJwks from "./auth/jwks.mjs";
+
+mcp: Mcp({ tools, auth: OAuth({ issuer: "https://auth.example.com" }), jwks: myJwks }),
+```
+
+- `createAccessTokenVerifier({ issuer, audience, scopes, clockToleranceS, jwksUri, algorithms })` returns
+  `(token) => Promise<{ subject, scopes, payload }>`; `introspectAccessToken(token, { endpoint, clientId,
+  clientSecret, issuer, audience, scopes })` returns the same.
+- A refusal throws an error with `@runsnip/jwks`' codes: `ERR_JWT_CLAIM` with `claim: "scope"` is answered 403
+  (`insufficient_scope`); `ERR_JWKS_FETCH`, `ERR_DISCOVERY` and `ERR_INTROSPECTION` 500; any other, 401.
+
 **From a browser,** a request whose `Origin` is not the server's own is refused (403), against DNS rebinding;
 `Mcp({ origins })` allows others.
 
@@ -157,8 +176,9 @@ With metrics on, each call is counted: `nextzones_mcp_calls_total{tool, outcome}
   with Next's own `@vercel/nft`), and the skill folders; `zones.js` reads the MCP server from there.
 - **`createZones({ mcp })`** gives or replaces it from code; `mcp: false` turns it off.
 
-`next-zones doctor` checks the declaration: `Metrics()` without `metrics: true`, a path a route or a zone serves, a
-`Bearer({ env })` whose variable is not set, mode `"single"`.
+`next-zones doctor` checks the declaration: `Metrics()` without `metrics: true`, a path a route or a zone serves,
+`OAuth(…)` without `@runsnip/jwks` installed (nor `Mcp({ jwks })`), a `Bearer({ env })` whose variable is not set, mode
+`"single"`.
 
 ## The numbers
 

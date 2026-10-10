@@ -40,9 +40,15 @@ const flat = (items) => items.flat(Infinity).filter((item) => item !== undefined
  * @param {object[]} [options.auth] Bearer(…), OAuth(…): a request passes with any one; without auth, the admin rule
  *                                  (Bearer <adminToken>, or a request from the same machine when no token is set)
  * @param {string[]} [options.origins] browser origins allowed besides the server's own (DNS rebinding guard)
+ * @param {object} [options.jwks]   what checks OAuth tokens: an object with createAccessTokenVerifier(options) and
+ *                                  introspectAccessToken(token, options), as @runsnip/jwks has them (the default, an
+ *                                  optional peer dependency, needed only with OAuth(…))
  */
 function Mcp(options = {}) {
-  const { path, url, name = "next-zones", version, instructions, tools = [], skills = [], auth, origins = [] } = options;
+  const { path, url, name = "next-zones", version, instructions, tools = [], skills = [], auth, origins = [], jwks } = options;
+  if (jwks !== undefined && (typeof jwks !== "object" || jwks === null || typeof jwks.createAccessTokenVerifier !== "function")) {
+    fail("Mcp", "jwks is an implementation of @runsnip/jwks' contract: an object with createAccessTokenVerifier (and introspectAccessToken, for introspection)");
+  }
   if (path !== undefined && !/^\/[A-Za-z0-9_.~/-]*[A-Za-z0-9_.~-]$/.test(path)) fail("Mcp", `path must be a path like "/_next-zones/mcp", got ${JSON.stringify(path)}`);
   if (url !== undefined) { try { new URL(url); } catch { fail("Mcp", `url must be an absolute URL, got ${JSON.stringify(url)}`); } }
   const toolList = flat([tools]);
@@ -55,7 +61,7 @@ function Mcp(options = {}) {
   if (authList) for (const a of authList) if (kindOf(a) !== "auth") fail("Mcp", "auth takes Bearer(…) and OAuth(…)");
   if (authList && !authList.length) fail("Mcp", "auth is empty: leave it out for the admin rule, or give Bearer(…) or OAuth(…)");
   if (!Array.isArray(origins) || origins.some((o) => typeof o !== "string")) fail("Mcp", "origins is a list of origins like \"https://app.example.com\"");
-  return tag("mcp", { path, url, name, version, instructions, tools: toolList, skills: skillList, auth: authList, origins });
+  return tag("mcp", { path, url, name, version, instructions, tools: toolList, skills: skillList, auth: authList, origins, jwks });
 }
 
 /** The tools of the server: any number of Tool(…), LivePull(), Metrics(), or lists of them. */

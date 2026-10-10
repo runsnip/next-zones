@@ -173,7 +173,7 @@ with `1` on an error.
 | A path alias that differs between zones has the form `"prefix/*": ["folder/*"]` | The form `dev` gives each zone |
 | `.next/`, `node_modules/`, `.zones-dev/`, `.zones-store/`, `.zones-images/`, `.zones-cache/`, `.zones-app/`, `.zones-export/` ignored by git (errors); `next-env.d.ts`, `*.tsbuildinfo` (warnings) | Asked of git itself (`git check-ignore`), so any `.gitignore` in the repository, or a global one, counts |
 | **Next's and React's checks** (not with `--fast`): `eslint-config-next`'s rules on each zone's sources, or the zone's own ESLint config; then `next typegen` and `tsc --noEmit` | Neither Next nor React ships a doctor. These are their official checks: Next's plugin, React's hooks and compiler rules, and the type check `next build` runs. They run from the workspace's installs (`eslint` 9, `eslint-config-next`, `typescript`); nothing is downloaded |
-| The shell's MCP server (`zoneConfig({ mcp })`): `Metrics()` with metrics on; its path under no route of the shell and no zone's mount (errors); a `Bearer({ env })` whose variable is set, not mode `"single"` (warnings) | Zones refuses to start otherwise |
+| The shell's MCP server (`zoneConfig({ mcp })`): `Metrics()` with metrics on; its path under no route of the shell and no zone's mount; `@runsnip/jwks` installed for `OAuth(…)`, unless `Mcp({ jwks })` (errors); a `Bearer({ env })` whose variable is set, not mode `"single"` (warnings) | Zones refuses to start otherwise |
 | With `--store`: the versions `state.json` and `zones.json` pin are in the store, built with the shell's Next and React, and whole as built (their integrity, as Zones checks it) | Zones refuses them otherwise |
 | With `--url`: a Zones answers at that URL (a warning when it does not) | |
 

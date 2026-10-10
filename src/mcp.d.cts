@@ -81,6 +81,38 @@ export interface McpOptions {
   auth?: McpAuth[] | McpAuth;
   /** Browser origins allowed besides the server's own. */
   origins?: string[];
+  /** What checks OAuth tokens (default: @runsnip/jwks, an optional peer dependency needed only with OAuth). */
+  jwks?: JwksImplementation;
+}
+
+/** The contract of @runsnip/jwks that the MCP server uses: give another implementation as Mcp({ jwks }). */
+export interface JwksImplementation {
+  createAccessTokenVerifier(options: {
+    issuer: string;
+    audience: string;
+    scopes?: string[];
+    clockToleranceS?: number;
+    jwksUri?: string;
+    algorithms?: string[];
+    fetch?: typeof fetch;
+  }): (token: string) => Promise<VerifiedAccessToken>;
+  introspectAccessToken?(token: string, options: {
+    endpoint: string;
+    clientId?: string;
+    clientSecret?: string;
+    issuer?: string;
+    audience?: string;
+    scopes?: string[];
+    fetch?: typeof fetch;
+  }): Promise<VerifiedAccessToken>;
+}
+
+/** What a verifier returns; a refusal throws an error whose code is @runsnip/jwks' (ERR_JWT_CLAIM with claim "scope" for a
+    missing scope: 403; ERR_JWKS_FETCH, ERR_DISCOVERY, ERR_INTROSPECTION: 500; anything else: 401). */
+export interface VerifiedAccessToken {
+  payload: Record<string, unknown>;
+  scopes: string[];
+  subject: string | null;
 }
 
 /** Zones' MCP server, for the shell's zoneConfig({ mcp }). */
