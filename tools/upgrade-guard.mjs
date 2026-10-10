@@ -43,7 +43,15 @@ for (const file of fs.readdirSync(work).filter((f) => /\.(mjs|cjs|sh)$/.test(f))
 }
 const pkgFile = path.join(work, "package.json");
 const pkg = JSON.parse(fs.readFileSync(pkgFile, "utf8"));
-pkg.dependencies = { ...pkg.dependencies, next: nextVersion, "@runsnip/next-zones": `file:${root}`, "@spike/ext": `file:${path.join(root, "spikes", "ext-package")}` };
+/* @runsnip/jwks, next-zones' dependency: the checkout next-zones resolves it from (a link to the package's folder in
+   the monorepo), else the registry's. */
+let jwks = pkg.dependencies["@runsnip/jwks"];
+try {
+  const { createRequire } = await import("node:module");
+  const dir = path.dirname(fs.realpathSync(createRequire(path.join(root, "package.json")).resolve("@runsnip/jwks/package.json")));
+  jwks = dir.includes(`${path.sep}node_modules${path.sep}`) ? "^0.1.0" : `file:${dir}`;
+} catch { jwks = "^0.1.0"; }
+pkg.dependencies = { ...pkg.dependencies, next: nextVersion, "@runsnip/next-zones": `file:${root}`, "@runsnip/jwks": jwks, "@spike/ext": `file:${path.join(root, "spikes", "ext-package")}` };
 if (react) Object.assign(pkg.dependencies, { react, "react-dom": react });
 fs.writeFileSync(pkgFile, JSON.stringify(pkg, null, 2));
 

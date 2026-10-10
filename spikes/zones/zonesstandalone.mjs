@@ -79,7 +79,9 @@ try {
     status: (await mcp("tools/call", { name: "zones_status", arguments: {} })).result?.structuredContent?.zones?.blog,
     skill: (await mcp("resources/read", { uri: "skill://release/SKILL.md" })).result?.contents?.[0]?.text?.includes("# Release a zone"),
   };
-  if (seen.mcp.greet !== "hello from the standalone shell to you" || seen.mcp.status !== "1.0.0" || !seen.mcp.skill) wrong.mcp = { ...seen.mcp, log: log.slice(-1500) };
+  /* next-zones' dependency, @runsnip/jwks (OAuth), in the folder beside it. */
+  seen.mcp.jwks = fs.existsSync(path.join(away, "node_modules", "@runsnip", "jwks", "dist", "index.js"));
+  if (seen.mcp.greet !== "hello from the standalone shell to you" || seen.mcp.status !== "1.0.0" || !seen.mcp.skill || !seen.mcp.jwks) wrong.mcp = { ...seen.mcp, log: log.slice(-1500) };
   const ext = await get("/blog/ext");
   seen.ext = /zone blog ext (<!-- -->)?from an external package/.test(ext.body) ? "from an external package" : ext.status;
   if (seen.ext !== "from an external package") wrong.ext = { status: ext.status, body: ext.body.slice(0, 300), log: log.slice(-1500) };

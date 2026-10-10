@@ -14,6 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 const PACKAGE_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 /* The folder this code runs from: dist/ in the published package (src/ in the repository), the package's exports'
@@ -89,6 +90,11 @@ export async function prepareStandaloneZones({ shellDir, declaration, store, pin
   }
   /* Its code, where its package.json's exports point (dist/), whichever folder it runs from. */
   fs.cpSync(CODE_DIR, path.join(own, "dist"), { recursive: true });
+  /* Its dependency, @runsnip/jwks, beside it as npm installs it (Zones' MCP server checks OAuth tokens with it). */
+  const jwksDir = path.dirname(fs.realpathSync(createRequire(path.join(PACKAGE_DIR, "package.json")).resolve("@runsnip/jwks/package.json")));
+  const jwks = path.join(root, "node_modules", "@runsnip", "jwks");
+  fs.rmSync(jwks, { recursive: true, force: true });
+  for (const entry of ["package.json", "dist", "LICENSE"]) if (fs.existsSync(path.join(jwksDir, entry))) fs.cpSync(path.join(jwksDir, entry), path.join(jwks, entry), { recursive: true });
   /* What Zones' server needs that the shell's own trace did not reach (Next's modules it hooks or calls, its workers'),
      traced the way Next traces server.js (Next's own @vercel/nft) and copied in where missing. */
   await traceZonesRuntime({ shellDir, root });

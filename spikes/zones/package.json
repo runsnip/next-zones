@@ -8,6 +8,7 @@
     "fixtures-cc/*"
   ],
   "dependencies": {
+    "@runsnip/jwks": "file:../../../jwks",
     "@runsnip/next-zones": "file:../..",
     "@spike/ext": "file:../ext-package",
     "next": "16.3.8",

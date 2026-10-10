@@ -88,6 +88,14 @@ fs.rmSync(path.join("node_modules", "@runsnip", "next-zones", "dist"), { recursi
 fs.cpSync("../../dist/", path.join("node_modules", "@runsnip", "next-zones", "dist"), { recursive: true });
 /* Its exports map too (a new subpath, such as ./metrics, is resolved from it). */
 fs.copyFileSync("../../package.json", path.join("node_modules", "@runsnip", "next-zones", "package.json"));
+/* Its dependency, @runsnip/jwks (its package.json and dist/), as npm would install it beside it. */
+{
+  const { createRequire } = await import("node:module");
+  const jwksDir = path.dirname(fs.realpathSync(createRequire(path.resolve("../../package.json")).resolve("@runsnip/jwks/package.json")));
+  const into = path.join("node_modules", "@runsnip", "jwks");
+  fs.rmSync(into, { recursive: true, force: true });
+  for (const entry of ["package.json", "dist"]) fs.cpSync(path.join(jwksDir, entry), path.join(into, entry), { recursive: true });
+}
 /* Its skills (NextZonesSkill() serves skills/next-zones). */
 fs.rmSync(path.join("node_modules", "@runsnip", "next-zones", "skills"), { recursive: true, force: true });
 fs.cpSync("../../skills", path.join("node_modules", "@runsnip", "next-zones", "skills"), { recursive: true });

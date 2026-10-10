@@ -1444,8 +1444,8 @@ export default zoneConfig({
   still serves, and its tools still install and pull, under the same rules.
 - **Zones only** (mode `"zones"`, `output: "standalone"` included). One app (mode `"single"`) has no Zones, and no MCP
   server.
-- **No other package.** The transport, the JSON-RPC and the authorization are next-zones' own (see
-  [the numbers](#the-numbers)).
+- **Light.** The transport and the JSON-RPC are next-zones' own; OAuth tokens are checked with
+  [`@runsnip/jwks`](https://github.com/runsnip/jwks), which has no dependency of its own (see [the numbers](#the-numbers)).
 
 ## Tools
 
@@ -1539,10 +1539,10 @@ token (`NEXT_ZONES_ADMIN_TOKEN`) as a bearer token, or, when none is set, a requ
   the issuer;
 - a request without a valid token gets 401, with `WWW-Authenticate: Bearer resource_metadata="…"`, which a client
   follows to the authorization server; a token without the scopes needed gets 403, `error="insufficient_scope"`;
-- a JWT is checked against the issuer's keys (its JWKS, found from its metadata or `jwksUri`, cached, fetched again
-  for a new key id): signature (`RS*`, `PS*`, `ES*`, `EdDSA`), `iss`, `aud`, `exp` and `nbf` (60 s of leeway), scopes
-  (`scope` or `scp`). With `introspection: { url, clientId, clientSecret }`, any token the issuer confirms active
-  (RFC 7662);
+- a JWT is checked with [`@runsnip/jwks`](https://github.com/runsnip/jwks) against the issuer's keys (its JWKS, found
+  from its metadata or `jwksUri`, kept, fetched again for a key rotated in): signature (`RS*`, `PS*`, `ES*`, `EdDSA`;
+  a key verifies only its own type's), `iss`, `aud`, `exp` and `nbf` (60 s of leeway), scopes (`scope` or `scp`). With
+  `introspection: { url, clientId, clientSecret }`, any token the issuer confirms active (RFC 7662);
 - `aud` must hold `audience`, by default the server's canonical URL. Behind a proxy, give it: `Mcp({ url:
   "https://app.example.com/_next-zones/mcp" })`.
 
@@ -1586,7 +1586,7 @@ Node 24.16, Apple M1, measured 2026-10-10. The reference is the official SDK (`@
 
 | | next-zones | the SDK |
 |---|---|---|
-| Installed | 52 KB of source, no package | 26 MB, 91 packages |
+| Installed | 52 KB of source, and `@runsnip/jwks` (13 KB packed, no dependency) | 26 MB, 91 packages |
 | Loading it (median of 5 fresh processes) | 3.5 ms, +3.1 MB RSS | 78 ms, +37 MB RSS |
 | A call, p50 | 0.078, 0.085 ms | 0.193, 0.216 ms |
 | A call, p99 | 0.17, 0.34 ms | 1.15, 1.08 ms |

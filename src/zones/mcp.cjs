@@ -14,8 +14,9 @@
  *   { zones, auth, signal }), and Zones' own: zones_status, zones_images, zones_pull and zones_install (LivePull()),
  *   zones_metrics (Metrics()). A pull on request needs the zone's livePull, as for the admin URLs.
  * - Skills (Skills(…)): resources skill://<name>/<file>, and one prompt per skill, its SKILL.md.
- * Nothing here depends on another package: the official SDK installs 26 MB in 91 packages and takes 78 ms and 37 MB
- * to load (measured 2026-10-10, Node 24.16, Apple M1); see RESULTS.md, "MCP".
+ * The transport and the JSON-RPC are next-zones' own, and OAuth tokens are checked with @runsnip/jwks (no dependency
+ * of its own): the official SDK installs 26 MB in 91 packages and takes 78 ms and 37 MB to load (measured 2026-10-10,
+ * Node 24.16, Apple M1); see RESULTS.md, "MCP".
  */
 const fs = require("node:fs");
 const path = require("node:path");
