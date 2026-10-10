@@ -12,6 +12,7 @@ Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router and Pages Router. Key:
 |---|---|
 | `page`, `layout`, dynamic routes, catch-all, optional catch-all, route groups, parallel routes | ✅ |
 | `loading` (streaming), `error`, `not-found` | ✅ |
+| A URL under a zone's mount that nothing serves: the zone's own not-found page (`app/not-found`, or `pages/404`), else the shell's | ✅ in every mode ([not found](concepts.md#not-found)) |
 | Intercepting routes (modals) | ✅ |
 | Route handlers (`route.ts`) | ✅ |
 | A zone's metadata routes (`/blog/sitemap.xml`, `/blog/opengraph-image`) | ✅ (the root `/sitemap.xml` and `/robots.txt` are the shell's) |

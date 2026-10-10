@@ -15,7 +15,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
-import { findZones, declarationProblems } from "./workspace.mjs";
+import { findZones, declarationProblems, ownNotFound, notFoundFile, routerDir } from "./workspace.mjs";
 
 const CONFIG_FILES = ["next.config.mjs", "next.config.js", "next.config.ts", "next.config.mts"];
 const SHARED_PACKAGES = ["next", "react", "react-dom"];
@@ -25,6 +25,25 @@ const { imageKeysDiffering } = createRequire(import.meta.url)("./zones/image-con
 /* Files a zone's app/ may hold at its top level besides its mount: used when it runs alone, the shell's on Zones. */
 const ROOT_ONLY = /^(layout|not-found|global-error|global-not-found|error|loading|template|default)\.(tsx|ts|jsx|js)$|\.(css|scss|sass)$/;
 const SOURCE = /\.(tsx|ts|jsx|js|mjs)$/;
+const { digestBuild } = createRequire(import.meta.url)("./zones/describe.cjs");
+
+/* Where a package is installed for code in `dir`: the first node_modules/<name> up from it, as Node resolves it
+   (package.json read directly, so a package whose exports hide it is found too). */
+function packageDir(dir, name) {
+  for (let at = path.resolve(dir); ; at = path.dirname(at)) {
+    const candidate = path.join(at, "node_modules", name, "package.json");
+    if (fs.existsSync(candidate)) return path.dirname(fs.realpathSync(candidate));
+    if (path.dirname(at) === at) return null;
+  }
+}
+const versionAt = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")).version ?? null; } catch { return null; } };
+const readPackage = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")); } catch { return {}; } };
+/* Whether any source file under `dirs` imports `specifier`. */
+const imports = (dirs, specifier) => dirs.filter((d) => fs.existsSync(d)).some((d) => [...walk(d)].some((file) => {
+  if (!SOURCE.test(file)) return false;
+  const text = fs.readFileSync(file, "utf8");
+  return text.includes(`"${specifier}"`) || text.includes(`'${specifier}'`);
+}));
 
 /** A zone's full Next config, as its build would see it (a build for Zones: no alias rewrites of its own). */
 async function loadConfig(dir) {
@@ -178,6 +197,13 @@ export async function doctor({ dirs, store, url, fast = false, print = console.l
       for (const file of ["instrumentation-client.ts", "instrumentation-client.js"]) {
         if (fs.existsSync(path.join(z.dir, file)) || fs.existsSync(path.join(z.dir, "src", file))) warn(z.name, `${file} runs in documents the shell serves, that is every page`, "intended for the shell; nothing to do");
       }
+      /* <ZoneUpdates />: open tabs follow a new version only with the events endpoint, and importing
+         @runsnip/next-zones/client gives the shell's browser runtime every feature a zone's client code may use. */
+      const shellSources = ["app", "src", "pages", "components"].map((d) => path.join(z.dir, d));
+      const client = imports(shellSources, "@runsnip/next-zones/client");
+      if (!client && zones.some((o) => o !== shell && routerDir(o.dir, "app"))) warn(z.name, "does not import @runsnip/next-zones/client", "render <ZoneUpdates /> in its root layout: open tabs then follow new versions, and its browser runtime gets every feature a zone's client code may use (Zones refuses a zone that needs one it lacks)");
+      if (client && !z.endpoints?.events) warn(z.name, "renders <ZoneUpdates /> but declares no events endpoint, so it does nothing", "declare endpoints: { events: true } in its zoneConfig");
+      if (z.endpoints?.events && !client) warn(z.name, "declares the events endpoint but renders no <ZoneUpdates />", "render <ZoneUpdates /> from @runsnip/next-zones/client in its root layout");
       continue;
     }
     if (shellConfig) {
@@ -202,13 +228,55 @@ export async function doctor({ dirs, store, url, fast = false, print = console.l
     /* A mount or an alias on a segment the shell serves: refused at install (stage.cjs). The shell's app/<segment>,
        also inside route groups ((group)/<segment>). */
     const shellApp = shell && ["app", "src/app"].map((d) => path.join(shell.dir, d)).find((d) => fs.existsSync(d));
+    const segments = [z.mount.slice(1), ...(z.aliases ?? []).map((a) => a.source.split("/")[1])];
     if (shellApp) {
       const groups = fs.readdirSync(shellApp).filter((e) => /^\(.+\)$/.test(e)).map((g) => path.join(shellApp, g));
       const shellServes = (segment) => [shellApp, ...groups].some((d) => fs.existsSync(path.join(d, segment)));
-      for (const segment of [z.mount.slice(1), ...(z.aliases ?? []).map((a) => a.source.split("/")[1])]) {
+      for (const segment of segments) {
         if (shellServes(segment)) fail(z.name, `/${segment} is the shell's too (its app/${segment})`, `a segment has one owner: move the shell's app/${segment} away, or mount the zone elsewhere`);
       }
     }
+    /* The shell's Pages Router pages and public files at the zone's segments: the same. */
+    const shellPages = shell && routerDir(shell.dir, "pages");
+    for (const segment of segments) {
+      if (shellPages && fs.readdirSync(shellPages).some((e) => e === segment || e.replace(/\.[^.]+$/, "") === segment)) fail(z.name, `/${segment} is the shell's too (its pages/${segment})`, `a segment has one owner: move the shell's pages/${segment} away, or mount the zone elsewhere`);
+      if (shell && fs.existsSync(path.join(shell.dir, "public", segment))) fail(z.name, `/${segment} is the shell's too (its public/${segment}/)`, `the zone's public files live under its own public/${segment}/: move the shell's away`);
+    }
+    /* Zones' own URLs, under the shell's endpoints.base: never a zone's segment. */
+    const base = shell?.endpoints?.base;
+    if (base && segments.includes(base.split("/")[1])) fail(z.name, `/${base.split("/")[1]} is where Zones serves its own URLs (the shell's endpoints.base ${base})`, "mount the zone elsewhere, or give endpoints another base");
+    /* The packages its server code leaves external resolve from the shell's node_modules, where Zones loads them. */
+    for (const name of config.serverExternalPackages ?? []) {
+      if (shell && !packageDir(shell.dir, name)) fail(z.name, `serverExternalPackages: ${name} is not installed where the shell resolves it`, `install ${name} in the workspace (hoisted), so the shell's node_modules has it`);
+    }
+    /* A package the zone and the shell both use, installed twice: each build gets its own copy, so a module with state
+       (a context, a client) exists twice under Zones, and a component of it remounts between them. */
+    if (shell) {
+      const deps = (dir) => { const pkg = readPackage(dir); return new Set(Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })); };
+      const shellDeps = deps(shell.dir);
+      for (const name of deps(z.dir)) {
+        if (!shellDeps.has(name) || SHARED_PACKAGES.includes(name) || name === "@runsnip/next-zones") continue;
+        const mine = packageDir(z.dir, name), shells = packageDir(shell.dir, name);
+        if (mine && shells && mine !== shells && versionAt(mine) !== versionAt(shells)) warn(z.name, `${name} ${versionAt(mine)} is another copy than the shell's (${versionAt(shells)})`, "under Zones each copy loads on its own: a context or a client it holds exists twice, and its components remount between the shell and the zone. Use one version");
+      }
+    }
+    /* Next's output "export": the shell's says it for the whole workspace, so every zone exports too. */
+    if (shellConfig?.output === "export" && config.output !== "export") fail(z.name, `the shell's output is "export", the zone's ${config.output ? `"${config.output}"` : "unset"}`, 'set output: "export" in its Next config: next-zones build exports each zone and links them into one static site');
+    /* One project root for every build: Zones refuses an image built from another root than the shell's. */
+    const rootOf = (c, dir) => { const r = c?.turbopack?.root ?? c?.outputFileTracingRoot; return r ? path.resolve(dir, r) : null; };
+    const mine = rootOf(config, z.dir), shells = shell && rootOf(shellConfig, shell.dir);
+    if (mine && shells && mine !== shells) fail(z.name, `is built from ${mine}, the shell from ${shells} (turbopack.root, outputFileTracingRoot)`, "build the shell and every zone from one root, or leave them unset (next-zones build sets them)");
+    /* next-zones build names an image by the zone's version. */
+    if (!readPackage(z.dir).version) warn(z.name, 'has no "version" in its package.json', "next-zones build names its image by it (or pass --version)");
+    /* Its own not-found page answers a 404 under its mount, as when it runs alone. */
+    const notFound = ownNotFound(z.dir);
+    if (routerDir(z.dir, "app") && (notFoundFile(z.dir, "pages", "404") || notFoundFile(z.dir, "pages", "_error")) && notFound !== "/_not-found/page") {
+      warn(z.name, "has pages/404 (or _error) and an app/ folder: Next renders a 404 with the App Router's not-found, never pages/404", "add app/not-found.tsx for the zone's own 404 page; without it, the shell's answers under its mount");
+    }
+    if (notFound === "/_not-found/page" && !notFoundFile(z.dir, "app", "not-found")) warn(z.name, "has app/global-not-found but no app/not-found", "next-zones dev shows the shell's not-found under its mount; Zones and one app show its own. Add app/not-found.tsx to see it in dev");
+    /* A Pages Router zone renders <ZoneUpdates /> in its own _app, so open tabs on its pages follow new versions. */
+    const zonePages = routerDir(z.dir, "pages");
+    if (zonePages && fs.readdirSync(zonePages).some((e) => e === z.mount.slice(1) || e.replace(/\.[^.]+$/, "") === z.mount.slice(1)) && shell?.endpoints?.events && !imports([zonePages], "@runsnip/next-zones/client")) warn(z.name, "its Pages Router pages do not render <ZoneUpdates />", "render it in its pages/_app: a tab on its pages then follows a new version at once");
     /* Its routes: under app<mount>/ (App Router), pages<mount>/ or pages<mount>.tsx (Pages Router), or both. */
     const segment = z.mount.slice(1);
     const appDir = ["app", "src/app"].map((d) => path.join(z.dir, d)).find((d) => fs.existsSync(d));
@@ -324,6 +392,24 @@ export async function doctor({ dirs, store, url, fast = false, print = console.l
         }
       }
       if (state) ok("store", `state.json: ${Object.entries(state.zones ?? {}).map(([n, v]) => `${n} ${v}`).join(", ") || "no pins"}`);
+    }
+    /* Every image pinned, by state.json or by the workspace's zones.json: whole, as built (Zones checks the same before
+       it installs one, and refuses it otherwise). */
+    if (fs.existsSync(store)) {
+      const pinned = new Map();
+      try { for (const [n, v] of Object.entries(JSON.parse(fs.readFileSync(path.join(store, "state.json"), "utf8")).zones ?? {})) pinned.set(`${n}@${v}`, [n, String(v)]); } catch {}
+      for (const dir of dirs) {
+        try { for (const [n, v] of Object.entries(JSON.parse(fs.readFileSync(path.join(dir, "zones.json"), "utf8")).zones ?? {})) pinned.set(`${n}@${v}`, [n, String(v)]); } catch {}
+      }
+      for (const [name, version] of pinned.values()) {
+        const image = path.join(store, name, version);
+        if (!fs.existsSync(path.join(image, "zone.json"))) { error("store", `${name} ${version} is pinned but not in the store`, `next-zones build ${name}, or next-zones pull ${name} ${version} --store ${store} --source …`); continue; }
+        const recorded = JSON.parse(fs.readFileSync(path.join(image, "zone.json"), "utf8")).integrity;
+        if (!recorded) { warn("store", `${name} ${version} records no integrity`, "rebuild it with next-zones build"); continue; }
+        const found = digestBuild(image);
+        if (found.digest !== recorded.digest) error("store", `${name} ${version} differs from the build that was stored (${found.files} files, ${recorded.files} at build time)`, "copy it again, or rebuild it: Zones refuses it");
+        else ok("store", `${name} ${version}: whole, as built (${recorded.files} files)`);
+      }
     }
   }
   if (url) {

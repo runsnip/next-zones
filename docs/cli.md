@@ -158,15 +158,22 @@ with `1` on an error.
 | A zone's `headers`, `redirects` and `rewrites` under its mount or aliases | Root rules belong to the shell |
 | No `proxy`/`middleware` or `instrumentation-client` in a zone | They would not run when the zone is reached from the shell |
 | A zone's `app/` holds its mount, plus root files used alone (`layout`, `not-found`, `global-error`, `global-not-found`, `error`, `loading`, `template`, `default`, CSS) | Routes outside the mount are refused |
-| No zone's mount or alias on a segment the shell's `app/` serves (route groups included) | A segment has one owner; refused at install |
+| No zone's mount or alias on a segment the shell's `app/` (route groups included), `pages/` or `public/` serves, or on the shell's `endpoints.base` | A segment has one owner; refused at install |
 | No edge runtime in a zone | Not served by Zones yet |
 | A zone's `pages/` holds its mount (`pages<mount>/`, `pages<mount>.tsx`), plus `_app`, `_document`, `_error`, `404`, `500` | Pages outside the mount, `pages/api/` among them (served at `/api/…`), are refused |
 | A zone's `public/` holds only `public/<mount>/` | Public files are served at the root, beside other zones' |
+| A zone's `serverExternalPackages` installed where the shell resolves them | Zones loads them from the shell's `node_modules` |
+| The shell and every zone built from one root (`turbopack.root`, `outputFileTracingRoot`, when set) | Zones refuses an image built from another root |
+| With the shell's `output: "export"`, every zone's too | `next-zones build` links the zones' exports into one site |
+| A package a zone shares with the shell installed once (warning) | Two copies load as two modules: a context or a client exists twice, and its components remount between them |
+| A `version` in each zone's `package.json` (warning) | `next-zones build` names the image by it, unless `--version` |
+| A zone's own not-found page: `pages/404` beside an `app/` folder, which Next never shows (warning); only `app/global-not-found` (warning: `dev` shows the shell's) | [Not found](concepts.md#not-found) |
+| `<ZoneUpdates />`: the shell imports `@runsnip/next-zones/client` and declares `endpoints.events`, each with the other; a Pages Router zone renders it in its `_app` (warnings) | Open tabs follow new versions; the shell's browser runtime gets every feature a zone's client code may use |
 | `env` keys with one value across zones (warning) | Composed by `dev`, a key has one value |
 | A path alias that differs between zones has the form `"prefix/*": ["folder/*"]` | The form `dev` gives each zone |
 | `.next/`, `node_modules/`, `.zones-dev/`, `.zones-store/`, `.zones-images/`, `.zones-cache/`, `.zones-app/`, `.zones-export/` ignored by git (errors); `next-env.d.ts`, `*.tsbuildinfo` (warnings) | Asked of git itself (`git check-ignore`), so any `.gitignore` in the repository, or a global one, counts |
 | **Next's and React's checks** (not with `--fast`): `eslint-config-next`'s rules on each zone's sources, or the zone's own ESLint config; then `next typegen` and `tsc --noEmit` | Neither Next nor React ships a doctor. These are their official checks: Next's plugin, React's hooks and compiler rules, and the type check `next build` runs. They run from the workspace's installs (`eslint` 9, `eslint-config-next`, `typescript`); nothing is downloaded |
-| With `--store`: `state.json` pins versions in the store, built with the shell's Next and React | Zones refuses them otherwise |
+| With `--store`: the versions `state.json` and `zones.json` pin are in the store, built with the shell's Next and React, and whole as built (their integrity, as Zones checks it) | Zones refuses them otherwise |
 | With `--url`: a Zones answers at that URL (a warning when it does not) | |
 
 ## `next-zones dev`
@@ -197,8 +204,12 @@ It composes the shell and every zone into one Next app, `<zones dir>/.zones-dev/
 **What zones must agree on, composed:**
 - **A path alias that differs between zones** must have the form `"prefix/*": ["folder/*"]`, which is what `@/*` is.
 - **An `env` key has one value** across zones.
-- **The shell's root files serve everyone.** A zone's own root layout and root `not-found` serve it when it runs alone,
-  as on Zones.
+- **The shell's root files serve everyone.** A zone's own root layout serves it when it runs alone, as on Zones.
+- **A zone's own not-found page** answers a URL under its mount that nothing serves, as on Zones: a fallback rewrite
+  of the mount (after every route and rule) reaches a page composed for it, either
+  `app/(next-zones-not-found)/<mount>/next-zones-not-found` (calling `notFound()`, whose `not-found` is the zone's
+  `app/not-found`) or `pages/<mount>/next-zones-not-found` (the zone's `pages/404` or `_error`, status 404). A zone
+  with only `app/global-not-found` gets the shell's in dev.
 
 ## `next-zones watch`
 

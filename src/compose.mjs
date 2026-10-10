@@ -16,6 +16,11 @@
  *   when several have, a composed _app and _document render each page with its own zone's, picked by the page's
  *   mount, as each zone's pages render in their own documents on Zones. Pages are not linked but re-exported (a stub
  *   per page, written again when the exports it names change): Turbopack's dev server does not follow a linked page.
+ * - a 404 under a zone's mount, with the zone's own not-found page, as on Zones: a fallback rewrite (after every route
+ *   and rule) sends such a URL to a page that renders it, app/(next-zones-not-found)/<mount>/next-zones-not-found
+ *   (notFound(), whose not-found is the zone's app/not-found, in the root layout only) or
+ *   pages<mount>/next-zones-not-found (the zone's pages/404 or _error, with a 404 status). A zone with only an
+ *   app/global-not-found gets the shell's in dev.
  * - public/: the shell's and each zone's public files.
  * - next.config.mjs: the shell's config, with every zone's transpilePackages, env, headers, redirects and rewrites
  *   added, and the zones' aliases as rewrites.
@@ -32,7 +37,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL, fileURLToPath } from "node:url";
-import { findZones } from "./workspace.mjs";
+import { findZones, ownNotFound, notFoundFile } from "./workspace.mjs";
 
 async function findShellAndZones(zonesDir) {
   const { zones, failed } = await findZones([zonesDir]);
@@ -137,7 +142,7 @@ const STATIC_ERROR = /^(404|500)\.(tsx|ts|jsx|js)$/;
  * The Pages Router of the composed app: each zone's pages under its mount, the shell's pages, and one _app and one
  * _document. With one owner of them, its own are linked; with several, composed ones pick each page's own zone's by
  * the page's mount (a page outside every zone's mount is the shell's), as on Zones each zone's pages render in their
- * own documents. _error, 404 and 500 are the shell's, else the first zone's that has them.
+ * own documents. _error and 500 are the shell's, else the first zone's that has them; 404 the shell's.
  */
 function composePages({ shell, zones, out }) {
   const at = path.join(out, "pages");
@@ -151,7 +156,8 @@ function composePages({ shell, zones, out }) {
       const file = path.join(dir, entry);
       const system = SYSTEM.exec(entry);
       if (system) { if (system[1] === "_error") { if (!errorPages.has("_error")) errorPages.set("_error", file); } else files[system[1]] = file; continue; }
-      if (STATIC_ERROR.test(entry)) { if (!errorPages.has(entry.replace(/\..*$/, ""))) errorPages.set(entry.replace(/\..*$/, ""), file); continue; }
+      /* A zone's own 404 answers under its mount only (composeNotFound); the app's is the shell's. */
+      if (STATIC_ERROR.test(entry)) { const name = entry.replace(/\..*$/, ""); if (!errorPages.has(name) && (name !== "404" || mount === "/")) errorPages.set(name, file); continue; }
       if (mount !== "/" && entry !== mount.slice(1) && entry.replace(/\.[^.]+$/, "") !== mount.slice(1)) continue;
       stubPages(file, path.join(at, entry));
       followed.push([file, path.join(at, entry)]);
@@ -220,6 +226,43 @@ export default class ComposedDocument extends NextDocument {
   return followed;
 }
 
+/*
+ * A 404 under a zone's mount, rendered with the zone's own not-found page, as on Zones: a page of the composed app for
+ * each zone that has one, reached by a fallback rewrite of its mount (compose-config.mjs), which applies only once no
+ * route, file or rule served the URL. Returns { pages: zone name → the page's path }.
+ */
+const NOT_FOUND_PAGE = "next-zones-not-found";
+function composeNotFound({ zones, out }) {
+  const pages = {};
+  const rel = (from, file) => JSON.stringify(path.relative(path.dirname(from), file).split(path.sep).join("/").replace(/^(?!\.)/, "./").replace(PAGE_SOURCE, ""));
+  for (const z of zones) {
+    const own = ownNotFound(z.dir);
+    const route = `${z.mount}/${NOT_FOUND_PAGE}`;
+    if (own === "/_not-found/page") {
+      /* notFound() in a segment whose not-found is the zone's root one; in a route group, so only the root layout
+         wraps it, as the zone's /_not-found renders on Zones. A zone with only app/global-not-found: the shell's. */
+      const file = notFoundFile(z.dir, "app", "not-found");
+      if (!file) continue;
+      const at = path.join(out, "app", `(${NOT_FOUND_PAGE})`, z.mount.slice(1), NOT_FOUND_PAGE);
+      fs.mkdirSync(at, { recursive: true });
+      fs.writeFileSync(path.join(at, "page.tsx"), `/* Written by next-zones dev: a URL under ${z.mount} that nothing serves renders ${z.name}'s own not-found page. */\nimport { notFound } from "next/navigation";\n\nexport default function ZoneNotFound(): never {\n  notFound();\n}\n`);
+      fs.writeFileSync(path.join(at, "not-found.tsx"), `/* Written by next-zones dev: ${z.name}'s app/not-found. */\nexport { default } from ${rel(path.join(at, "not-found.tsx"), file)};\n`);
+      pages[z.name] = route;
+    } else if (own === "/404" || own === "/_error") {
+      /* Under the zone's mount, so it renders with the zone's own _app and _document; with a 404 status. */
+      const file = notFoundFile(z.dir, "pages", own.slice(1));
+      const at = path.join(out, "pages", z.mount.slice(1), `${NOT_FOUND_PAGE}.tsx`);
+      fs.mkdirSync(path.dirname(at), { recursive: true });
+      const status = `export const getServerSideProps = ({ res }: { res: { statusCode: number } }) => {\n  res.statusCode = 404;\n  return { props: {} };\n};\n`;
+      fs.writeFileSync(at, own === "/404"
+        ? `/* Written by next-zones dev: a URL under ${z.mount} that nothing serves renders ${z.name}'s own pages/404. */\nexport { default } from ${rel(at, file)};\n${status}`
+        : `/* Written by next-zones dev: a URL under ${z.mount} that nothing serves renders ${z.name}'s own pages/_error. */\nimport ErrorPage from ${rel(at, file)};\n\nexport default function ZoneNotFound() {\n  return <ErrorPage statusCode={404} />;\n}\n${status}`);
+      pages[z.name] = route;
+    }
+  }
+  return { pages };
+}
+
 /** The folder the composed app is written to, for `next dev`. */
 export const composedDir = (zonesDir) => path.join(path.resolve(zonesDir), ".zones-dev");
 
@@ -253,6 +296,8 @@ export async function compose(zonesDir) {
 
   /* pages/ */
   const pagesFollowed = composePages({ shell, zones, out }) ?? [];
+  /* Each zone's own not-found page, under its mount. */
+  const notFound = composeNotFound({ zones, out });
 
   /* public/ */
   for (const z of [shell, ...zones]) {
@@ -366,7 +411,7 @@ export default ${JSON.stringify({ ...config, plugins }, null, 2)};
 import { mergeConfigs } from ${JSON.stringify(new URL("./compose-config.mjs", import.meta.url).href)};
 export default (phase) => mergeConfigs(${JSON.stringify({
     shell: configOf(shell.dir),
-    zones: zones.map((z) => ({ name: z.name, file: configOf(z.dir), aliases: z.aliases })),
+    zones: zones.map((z) => ({ name: z.name, mount: z.mount, file: configOf(z.dir), aliases: z.aliases, notFound: notFound.pages[z.name] ?? null })),
     root,
     /* Per zone: the folders its files are seen from (its own, and its mount in the composed app/), and its aliases. */
     scoped: [shell, ...zones].filter((z) => scoped.has(z.name)).map((z) => ({

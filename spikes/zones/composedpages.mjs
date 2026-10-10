@@ -55,6 +55,12 @@ try {
 
   await page.goto(`${BASE}/wiki`);
   result.wiki = { title: await title(), zone: await page.getAttribute("html", "data-zone"), ownApp: await page.textContent("#app"), docsApp: await page.isVisible("#inc") };
+  /* A 404 under wiki's mount is wiki's own pages/404, with its own _app; docs has an app/ folder and no app/not-found,
+     so the shell's. */
+  const wikiMissing = await page.goto(`${BASE}/wiki/nothing`);
+  result.wikiNotFound = { status: wikiMissing?.status(), title: await title(), zone: await page.getAttribute("html", "data-zone"), ownApp: await page.textContent("#app") };
+  const docsMissing = await fetch(`${BASE}/docs/a/b/c`);
+  result.docsNotFound = `${docsMissing.status} ${/could not be found/.test(await docsMissing.text()) ? "shell" : "other"}`;
   await page.goto(`${BASE}/blog`);
   result.blog = await title();
   await browser.close();
@@ -70,5 +76,7 @@ if (!/^ssr 1/.test(result.inDocs?.title ?? "") || !result.inDocs?.soft || result
 if (!result.hmr?.noReload) wrong.hmr = result.hmr;
 if (result.wiki?.title !== "wiki home" || result.wiki?.zone !== "wiki" || result.wiki?.ownApp !== "wiki app" || result.wiki?.docsApp) wrong.wiki = result.wiki;
 if (!/zone blog v/.test(result.blog ?? "")) wrong.blog = result.blog;
+if (result.wikiNotFound?.status !== 404 || result.wikiNotFound?.title !== "wiki not found" || result.wikiNotFound?.zone !== "wiki" || result.wikiNotFound?.ownApp !== "wiki app") wrong.wikiNotFound = result.wikiNotFound;
+if (result.docsNotFound !== "404 shell") wrong.docsNotFound = result.docsNotFound;
 console.log(JSON.stringify({ ...result, wrong, errors }, null, 2));
 process.exit(0);

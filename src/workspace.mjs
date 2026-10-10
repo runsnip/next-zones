@@ -60,3 +60,26 @@ export function declarationProblems(zones) {
   if (!owners.has("/")) problems.push(`no zone owns "/": exactly one zone, the shell, must declare "mount": "/"`);
   return problems;
 }
+
+/**
+ * The not-found page a zone has of its own, from its sources, as a page of its build, the one Next renders a 404 with
+ * when the zone runs alone: with an app/ folder, the App Router's ("/_not-found/page", from app/not-found or
+ * app/global-not-found; Next then renders no pages/404), else the Pages Router's ("/404" from pages/404, "/_error" from
+ * pages/_error). null when it has none: Next's default would render, and the shell's answers for it instead.
+ */
+export function ownNotFound(dir) {
+  const app = notFoundFile(dir, "app", "not-found") ?? notFoundFile(dir, "app", "global-not-found");
+  if (routerDir(dir, "app")) return app ? "/_not-found/page" : null;
+  if (!routerDir(dir, "pages")) return null;
+  return notFoundFile(dir, "pages", "404") ? "/404" : notFoundFile(dir, "pages", "_error") ? "/_error" : null;
+}
+
+/** A zone's app/ or pages/ folder (or under src/), if it has one. */
+export const routerDir = (dir, router) => ["", "src"].map((sub) => path.join(dir, sub, router)).find((d) => fs.existsSync(d)) ?? null;
+
+/** The file of one of a zone's own pages at the top of its app/ or pages/ ("not-found", "404"…), if it has it. */
+export function notFoundFile(dir, router, name) {
+  const at = routerDir(dir, router);
+  if (!at) return null;
+  return ["tsx", "ts", "jsx", "js", "mjs", "mdx"].map((ext) => path.join(at, `${name}.${ext}`)).find((f) => fs.existsSync(f)) ?? null;
+}

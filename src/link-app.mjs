@@ -18,6 +18,8 @@
  *   them, its data routes are the app's, a request under its build id is rewritten to the app's, and the app's
  *   instrumentation.js (which Next loads before any route renders) makes its route modules read their own build's
  *   manifests from the image.
+ * - a 404 under a zone's mount, as Zones renders it: with the zone's own not-found page, from its image (the app's
+ *   instrumentation.js makes the server load it, its manifests and its cache entry from there).
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -95,6 +97,7 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
   const pagesManifest = readJson(path.join(server, "pages-manifest.json"), {});
   const { escapeStringRegexp } = fromShell("next/dist/shared/lib/escape-regexp");
   const pagesZones = [];                                   // { zone, mount }: zones with Pages Router pages
+  const notFoundZones = [];                                // { zone, mounts, page }: zones with a not-found page of their own
   const chunksDir = path.join(dist, "static", "chunks");
   let known = null;
   const linked = [];
@@ -127,7 +130,8 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
 
     /* The client side, as an install analyses it: the chunks it writes again go straight into .next/static. A zone
        without App Router pages has nothing that runs in the shell's document. */
-    const hasAppPages = Object.keys(readJson(path.join(dir, "server", "app-paths-manifest.json"), {})).some(own);
+    const notFound = readJson(path.join(dir, "zone.json"), {}).notFound ?? null;
+    const hasAppPages = notFound === "/_not-found/page" || Object.keys(readJson(path.join(dir, "server", "app-paths-manifest.json"), {})).some(own);
     const analysis = hasAppPages
       ? await runWorker("zone-client.cjs", { dist: dir, shellDist, buildKey, outDir: chunksDir, known })
       : { missingUsed: [], shellModules: null, zoneModules: {}, mainItems: null, chunkMap: {}, idMap: {} };
@@ -174,6 +178,18 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
           fs.mkdirSync(path.join(server, "app", page), { recursive: true });
           fs.copyFileSync(path.join(pageManifests, file), path.join(server, "app", page, file));
         }
+      }
+    }
+    /* Its own not-found page renders a 404 under its mount from its image; an App Router one in the shell's document,
+       so its client reference manifest there is made to run in it, as a page's. */
+    if (notFound) {
+      notFoundZones.push({ zone, mounts: [mount, ...aliases.map((a) => `/${a.source.split("/")[1]}`)], page: notFound });
+      const manifestFile = path.join(home, "server", "app", "_not-found", "page_client-reference-manifest.js");
+      if (notFound === "/_not-found/page" && fs.existsSync(manifestFile)) {
+        const sandbox = { globalThis: {} };
+        new Function("globalThis", fs.readFileSync(manifestFile, "utf8"))(sandbox.globalThis);
+        const entries = Object.entries(sandbox.globalThis.__RSC_MANIFEST ?? {});
+        fs.writeFileSync(manifestFile, `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};\n${entries.map(([key, value]) => `globalThis.__RSC_MANIFEST[${JSON.stringify(key)}] = ${JSON.stringify(clientManifestForZone(value, change))};`).join("\n")}\n`);
       }
     }
     /* Its prerendered pages, where Next reads them, made to run in the shell's document. */
@@ -275,14 +291,25 @@ module.exports = { register, onRequestError };
 `);
   }
 
-  /* The zones' Pages Router pages render from their own builds: Next loads instrumentation.js before any route renders
-     (RouteModule.prepare), and it first makes the Pages route modules read a zone page's manifests (its build id, its
-     build manifest…) from the zone's image, as Zones does in memory (zones/hooks.cjs). */
-  if (pagesZones.length) {
-    fs.writeFileSync(path.join(server, "next-zones-pages.js"), `/* Written by next-zones: each zone's Pages Router pages render from their own build (.next/zones/<zone>). */
+  /* What Zones does in memory (zones/hooks.cjs), done by the app's own server: Next loads instrumentation.js before any
+     route renders (RouteModule.prepare), and it first requires next-zones-runtime.js, which
+     - makes the Pages route modules read a zone page's manifests (its build id, its build manifest…) from the zone's
+       image;
+     - renders a 404 under a zone's mount with the zone's own not-found page, from its image: the server's
+       findPageComponents loads it there, the App Router's reads its manifests there, and its cache entry is the zone's
+       ("<mount>/__zone-not-found"), not the shell's /_not-found. */
+  if (pagesZones.length || notFoundZones.length) {
+    fs.writeFileSync(path.join(server, "next-zones-runtime.js"), `/* Written by next-zones: zones' Pages Router pages and not-found pages render from their own build (.next/zones/<zone>). */
 const path = require("node:path");
+const { AsyncLocalStorage } = require("node:async_hooks");
 const zones = ${JSON.stringify(pagesZones.map(({ zone, mount }) => ({ zone, mount })))};
+const notFoundZones = ${JSON.stringify(notFoundZones)};
 const zoneOf = (page) => zones.find((z) => page === z.mount || page.startsWith(z.mount + "/"));
+const notFoundOf = (url) => {
+  const p = typeof url === "string" ? url.split("?")[0] : "";
+  return notFoundZones.find((z) => z.mounts.some((m) => p === m || p.startsWith(m + "/"))) ?? null;
+};
+const current = new AsyncLocalStorage();               // the zone whose not-found page renders this request's 404
 for (const runtime of ["next/dist/compiled/next-server/pages-turbo.runtime.prod.js", "next/dist/compiled/next-server/pages-api-turbo.runtime.prod.js"]) {
   let loaded;
   try { loaded = require(runtime); } catch { continue; }
@@ -294,7 +321,8 @@ for (const runtime of ["next/dist/compiled/next-server/pages-turbo.runtime.prod.
     Object.defineProperty(proto, "__nextZonesPages", { value: true });
     const loadManifests = proto.loadManifests;
     proto.loadManifests = function (srcPage, ...rest) {
-      const zone = typeof srcPage === "string" ? zoneOf(srcPage) : null;
+      const notFound = current.getStore();
+      const zone = typeof srcPage !== "string" ? null : zoneOf(srcPage) ?? (notFound && notFound.page === srcPage ? notFound : null);
       if (!zone) return loadManifests.call(this, srcPage, ...rest);
       const own = this.distDir;
       this.distDir = path.join(own, "zones", zone.zone);
@@ -302,10 +330,70 @@ for (const runtime of ["next/dist/compiled/next-server/pages-turbo.runtime.prod.
     };
   }
 }
+if (notFoundZones.length) {
+  const KEY = /^(.*\\/\\$)?\\/(_not-found|404)$/;
+  const ownKey = (key) => {
+    const zone = current.getStore();
+    const m = zone && typeof key === "string" ? KEY.exec(key) : null;
+    return m ? (m[1] || "") + zone.mounts[0] + "/__zone-not-found" : key;
+  };
+  const NextNodeServer = require("next/dist/server/next-server").default;
+  const { loadComponents } = require("next/dist/server/load-components");
+  const proto = NextNodeServer.prototype;
+  if (!proto.__nextZonesNotFound) {
+    Object.defineProperty(proto, "__nextZonesNotFound", { value: true });
+    /* A URL no route matches is rendered as the route /_not-found (or /404); a page's notFound by the error render. */
+    const renderPageComponent = proto.renderPageComponent;
+    proto.renderPageComponent = function (ctx, bubbleNoFallback) {
+      const zone = ctx && (ctx.pathname === "/_not-found" || ctx.pathname === "/404") ? notFoundOf(ctx.req && ctx.req.url) : null;
+      return zone ? current.run(zone, () => renderPageComponent.call(this, ctx, bubbleNoFallback)) : renderPageComponent.call(this, ctx, bubbleNoFallback);
+    };
+    const renderErrorToResponseImpl = proto.renderErrorToResponseImpl;
+    proto.renderErrorToResponseImpl = function (ctx, err) {
+      const zone = ctx && ctx.res && ctx.res.statusCode === 404 ? notFoundOf(ctx.req && ctx.req.url) : null;
+      return zone ? current.run(zone, () => renderErrorToResponseImpl.call(this, ctx, err)) : renderErrorToResponseImpl.call(this, ctx, err);
+    };
+    const findPageComponents = proto.findPageComponents;
+    proto.findPageComponents = async function (args) {
+      const zone = current.getStore();
+      if (!zone || !args || !((args.page === "/_not-found/page" && args.isAppPath) || (args.page === "/404" && !args.isAppPath))) return findPageComponents.call(this, args);
+      const components = await loadComponents({ distDir: path.join(this.distDir, "zones", zone.zone), page: zone.page, isAppPath: zone.page === "/_not-found/page", isDev: false, sriEnabled: this.sriEnabled, needsManifestsForLegacyReasons: false });
+      /* Its render is cached like the page it is: the route module makes an incremental cache per request, whose
+         keys are moved under the zone's mount, not the shell's /_not-found or /404. */
+      const routeModule = components.routeModule;
+      if (routeModule && typeof routeModule.getIncrementalCache === "function" && !Object.prototype.hasOwnProperty.call(routeModule, "getIncrementalCache")) {
+        const getIncrementalCache = routeModule.getIncrementalCache;
+        routeModule.getIncrementalCache = async function (...args) {
+          const cache = await getIncrementalCache.apply(this, args);
+          if (cache && !cache.__nextZonesNotFound) {
+            const { get, set } = cache;
+            Object.assign(cache, { __nextZonesNotFound: true, get: (key, ...rest) => get.call(cache, ownKey(key), ...rest), set: (key, ...rest) => set.call(cache, ownKey(key), ...rest) });
+          }
+          return cache;
+        };
+      }
+      return { components, query: components.getStaticProps ? {} : args.query };
+    };
+  }
+  /* The App Router's route module reads its page's manifests through this module, as it renders: the zone's not-found
+     page's, from its image. */
+  const file = require.resolve("next/dist/server/load-manifest.external.js");
+  const loaded = require(file);
+  if (!loaded.__nextZonesNotFound) {
+    const fromZone = (load) => (args) => {
+      const zone = current.getStore();
+      if (!zone || zone.page !== "/_not-found/page" || !args || typeof args.manifest !== "string" || !args.manifest.startsWith("server/app/_not-found/page")) return load(args);
+      return load({ ...args, distDir: path.join(args.distDir, "zones", zone.zone) });
+    };
+    const replacement = { ...loaded, __nextZonesNotFound: true, loadManifestFromRelativePath: fromZone(loaded.loadManifestFromRelativePath) };
+    if (typeof loaded.evalManifestFromRelativePath === "function") replacement.evalManifestFromRelativePath = fromZone(loaded.evalManifestFromRelativePath);
+    require.cache[file].exports = replacement;
+  }
+}
 `);
     const hook = path.join(server, "instrumentation.js");
     const existing = fs.existsSync(hook) ? fs.readFileSync(hook, "utf8") : "module.exports = {};\n";
-    fs.writeFileSync(hook, `require(__dirname + "/next-zones-pages.js");\n${existing}`);
+    fs.writeFileSync(hook, `require(__dirname + "/next-zones-runtime.js");\n${existing}`);
   }
   writeJson(path.join(server, "pages-manifest.json"), pagesManifest);
 

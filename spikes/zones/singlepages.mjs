@@ -58,6 +58,13 @@ try {
     seen[p] = got;
     if (got.status !== 200 || got.title !== title || got.zone !== zone || got.buildId !== ids[zone]) wrong[p] = got;
   }
+  /* A 404 under a zone's mount is the zone's own, as on Zones: wiki's pages/404 in its own document; docs has an app/
+     folder and no app/not-found, so the shell's. */
+  for (const [p, want] of [["/wiki/nothing", { status: 404, title: "wiki not found", zone: "wiki", buildId: ids.wiki }], ["/docs/a/b/c", { status: 404, title: null, zone: null }], ["/nothing", { status: 404, title: null, zone: null }]]) {
+    const got = await html(p);
+    seen[p] = got;
+    if (Object.entries(want).some(([k, v]) => got[k] !== v)) wrong[p] = got;
+  }
   const blog = await html("/blog");
   if (blog.status !== 200 || !/zone blog/.test(blog.title ?? "")) wrong["/blog"] = blog;
   for (const p of ["docs.json", "docs/a.json", "docs/zz.json", "docs/ssr.json?q=d"]) {

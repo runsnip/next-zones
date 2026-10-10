@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 
 const CHECKS = ["browse", "features", "bound", "swap", "links", "alias", "media", "routing", "rules", "routes", "proxy",
-  "revalidate", "instrumentation", "shared", "concurrent", "swapload", "signal", "external", "params", "miss", "many", "cc", "sharedver", "context", "standalone", "composed", "doctor", "init", "contract", "collect", "integrity", "health", "pull", "endpoints", "endpointsoff", "endpointsbase", "localdeps", "prune", "release", "single", "singlestandalone", "singleexport", "zonesstandalone", "zonesexport", "ownhandler", "reclaim", "lrumem", "isrswap", "widths", "leak", "metrics", "pagesrouter", "composedpages", "singlepages", "singlepagesstandalone"];
+  "revalidate", "instrumentation", "shared", "concurrent", "swapload", "signal", "external", "params", "miss", "many", "cc", "sharedver", "context", "standalone", "composed", "doctor", "init", "contract", "collect", "integrity", "health", "pull", "endpoints", "endpointsoff", "endpointsbase", "localdeps", "prune", "release", "single", "singlestandalone", "singleexport", "zonesstandalone", "zonesexport", "ownhandler", "reclaim", "lrumem", "isrswap", "widths", "leak", "metrics", "pagesrouter", "composedpages", "singlepages", "singlepagesstandalone", "notfound"];
 /* Checks that need their own setup: the environment for Zones and the check. */
 const SETUP = {
   /* A non-public env variable only the server may read (leak.mjs looks for it in everything a browser can fetch). */

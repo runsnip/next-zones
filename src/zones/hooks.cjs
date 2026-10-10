@@ -108,7 +108,7 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
           const real = (dir) => { try { return fs.realpathSync(dir) + path.sep; } catch { return null; } };
           const staged = build ? [...(ctx.staged?.values() ?? [])].find((z) => build === path.resolve(z.dist) + path.sep || build === real(z.dist)) : null;
           for (const z of staged ? [staged] : ctx.zones.values()) {
-            for (const page of Object.keys(z.appPaths)) {
+            for (const page of z.notFound === "/_not-found/page" ? [...Object.keys(z.appPaths), z.notFound] : Object.keys(z.appPaths)) {
               if (!args.manifest.startsWith(`server/app${page}`)) continue;
               remember(path.join(z.dist, args.manifest));
               const value = load({ ...args, projectDir: z.dist, distDir: "." });
@@ -180,6 +180,49 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
   const onRequestError = NextNodeServer.prototype.instrumentationOnRequestError;
   NextNodeServer.prototype.instrumentationOnRequestError = function (err, req, context) {
     return instrumentation.dispatchRequestError(() => onRequestError.call(this, err, req, context), err, { path: req?.url }, context);
+  };
+  /* A 404 under a zone's mount is the zone's: its own not-found page renders it, from its build, as when the zone runs
+     alone; the shell's answers for a zone without one (and for every URL outside the zones). Next renders a 404 two
+     ways: a URL no route matches is invoked as the route /_not-found (or /404) by the router server, and rendered by
+     renderPageComponent; a page's notFound goes through renderErrorToResponseImpl. Both ask findPageComponents for
+     /_not-found/page or /404: during a zone's 404, by the URL asked for, that is the zone's own page. */
+  const { loadComponents } = ctx.requireNext(next.files.loadComponents);
+  const notFoundZone = new AsyncLocalStorage();
+  const zoneOfRequest = (req) => {
+    if (!ctx.zones.size || typeof req?.url !== "string") return null;
+    const zone = ctx.zoneOfRoute(req.url.split("?")[0]);
+    return zone?.notFound ? zone : null;
+  };
+  const renderPageComponent = NextNodeServer.prototype.renderPageComponent;
+  NextNodeServer.prototype.renderPageComponent = function (renderCtx, bubbleNoFallback) {
+    const zone = renderCtx?.pathname === "/_not-found" || renderCtx?.pathname === "/404" ? zoneOfRequest(renderCtx.req) : null;
+    if (!zone) return renderPageComponent.call(this, renderCtx, bubbleNoFallback);
+    return notFoundZone.run(zone, () => renderPageComponent.call(this, renderCtx, bubbleNoFallback));
+  };
+  const renderErrorToResponseImpl = NextNodeServer.prototype.renderErrorToResponseImpl;
+  NextNodeServer.prototype.renderErrorToResponseImpl = function (renderCtx, err) {
+    const zone = renderCtx?.res?.statusCode === 404 ? zoneOfRequest(renderCtx.req) : null;
+    if (!zone) return renderErrorToResponseImpl.call(this, renderCtx, err);
+    return notFoundZone.run(zone, () => renderErrorToResponseImpl.call(this, renderCtx, err));
+  };
+  /* Its render is cached like the page it is (prerendered, it is read from the cache): its key is the shell's
+     /_not-found or /404, so during a zone's 404 it is moved under the zone's mount ("/shop/__zone-not-found"), where
+     the zone's cache, per version, holds it, and a swap drops it (zones-cache-handler.cjs). */
+  const NOT_FOUND_KEY = /^(.*\/\$)?\/(_not-found|404)$/;
+  globalThis.__NEXT_ZONES_OWN_KEY__ = (key) => {
+    const zone = notFoundZone.getStore();
+    if (!zone || typeof key !== "string") return key;
+    const m = NOT_FOUND_KEY.exec(key);
+    return m ? `${m[1] ?? ""}${zone.mount}/__zone-not-found` : key;
+  };
+  const findPageComponents = NextNodeServer.prototype.findPageComponents;
+  NextNodeServer.prototype.findPageComponents = async function (args) {
+    const zone = notFoundZone.getStore();
+    if (!zone || !((args?.page === "/_not-found/page" && args.isAppPath) || (args?.page === "/404" && !args.isAppPath))) return findPageComponents.call(this, args);
+    const isAppPath = zone.notFound === "/_not-found/page";
+    const components = await loadComponents({ distDir: path.resolve(zone.dist), page: zone.notFound, isAppPath, isDev: false, sriEnabled: this.sriEnabled, needsManifestsForLegacyReasons: false });
+    /* As findPageComponentsImpl: a page with getStaticProps gets no query. */
+    return { components, query: components.getStaticProps ? {} : args.query };
   };
   const getRouteMatchers = NextNodeServer.prototype.getRouteMatchers;
   if (typeof getRouteMatchers === "function") {

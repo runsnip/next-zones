@@ -28,6 +28,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { readZone } from "./config.mjs";
+import { ownNotFound } from "./workspace.mjs";
 import { copyTracedPackages, isStandalone, prepareStandaloneZones } from "./standalone.mjs";
 import { isExport, linkStaticSite } from "./link.mjs";
 
@@ -78,12 +79,14 @@ export async function buildZone({ zonesDir, zone: name, version = "1", store: st
   const builtWith = Object.fromEntries(["next", "react", "react-dom"].map((pkg) => [pkg, requireFromZone(`${pkg}/package.json`).version]));
   /* instrumentation-client is bundled into the zone's own documents only; Zones refuses it, so it is recorded. */
   const clientInstrumentation = ["", "src"].some((dir) => ["ts", "tsx", "js", "mjs"].some((ext) => fs.existsSync(path.join(work, dir, `instrumentation-client.${ext}`))));
+  /* The zone's own not-found page, which answers a URL under its mount that nothing serves (ownNotFound). */
+  const notFound = ownNotFound(work);
   /* What Zones needs to install it, read from the build once, here (D2), and the build's integrity, which Zones
      checks before it installs it. */
   const { describeBuild, digestBuild } = createRequire(import.meta.url)("./zones/describe.cjs");
   const install = describeBuild(target);
   const integrity = digestBuild(target);
-  fs.writeFileSync(path.join(target, "zone.json"), JSON.stringify({ name, version, ...zone, built: builtWith, clientInstrumentation, integrity, install }, null, 2) + "\n");
+  fs.writeFileSync(path.join(target, "zone.json"), JSON.stringify({ name, version, ...zone, built: builtWith, clientInstrumentation, notFound, integrity, install }, null, 2) + "\n");
   return target;
 }
 

@@ -30,6 +30,7 @@ These are the facts an assistant most often gets wrong. Each is detailed in the 
 - **A zone image enters a store only by a pull from a source**, never by an upload: a folder, a URL template (`https://host/{zone}/{version}.tgz`, `.tgz` or `.zip`, resumed on a dropped connection) or service-connector. `next-zones pull` pulls on the server side. A ping to a running Zones (`next-zones pull … --url`, or installing a version the store lacks) pulls only a zone declaring `livePull: true`; for any other zone, run `next-zones pull <zone> <version> --store <dir> --source …` on the server (safe beside a running Zones), then `install --url`. Old images are pruned (`--keep 2` by default).
 - **Zones' own URLs** (`/_next-zones/…`) exist only when the shell declares them: `endpoints: { events, health, admin }`. `events` and `health` are public (health's details go to an admin only); `admin` URLs need `Authorization: Bearer <NEXT_ZONES_ADMIN_TOKEN>`, or a request from the same machine when no token is set.
 - **The Pages Router works** (every mode): a zone's pages live in `pages/<mount>/…`, its own `_app` and `_document` at the top of `pages/`. Each Pages Router page renders whole in its zone's build (its document, build id, chunks): soft navigation inside the zone keeps `_app` state; going to another zone, or between the App Router and the Pages Router, loads a new document (Next's rule). `getStaticProps`, `getStaticPaths` (with `fallback`, `revalidate`) and `getServerSideProps` work.
+- **A 404 under a zone's mount is the zone's own** (every mode): a URL there that nothing serves, or a page answering `notFound`, gets the zone's `app/not-found` (with an `app/` folder; Next never shows `pages/404` then) or its `pages/404`/`_error` (only `pages/`), as when the zone runs alone; a zone without one, and every URL outside the zones, get the shell's.
 - **Open tabs follow a new version** when the shell renders `<ZoneUpdates />` from `@runsnip/next-zones/client` and declares `endpoints: { events: true }`; a Pages Router zone renders it in its own `_app` too.
 - **Metrics:** the shell's `metrics: true` opens one store for the process, read as Prometheus text at `/_next-zones/metrics` by an admin. `metrics: true` alone opens that URL: no `endpoints` declaration is needed. A zone's code measures with `counter`, `gauge`, `histogram` and `time` from `@runsnip/next-zones/metrics`; with metrics off they do nothing.
 - **Developing:** `next-zones dev <zones dir>` runs every zone in one `next dev`, with HMR and soft navigation. `next-zones doctor <dir>` checks a workspace and says what to fix.
@@ -133,6 +134,18 @@ zone on a segment the shell already serves.
 
 A zone can also serve a URL **at the root**, outside its mount, such as `/post/42` for its page `/blog/42`. That is an
 [alias](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/aliases.md): the page still lives under the mount, and the address bar shows the root URL.
+
+## Not found
+
+A URL under a zone's mount that nothing serves (no route, file or rule of the zone), and a page of the zone answering
+`notFound`, get **the zone's own not-found page**, the one Next shows when the zone runs alone:
+
+- with an `app/` folder: its `app/not-found` (or `app/global-not-found`), in the shell's root layout. Next never shows a
+  `pages/404` in an app with an `app/` folder, so neither does next-zones;
+- with only `pages/`: its `pages/404`, else its `pages/_error`, in its own document;
+- a zone without one gets the shell's, as does every URL outside the zones.
+
+The status is 404 in every mode (Zones, one app, `next-zones dev`), and a new version of the zone brings its own.
 
 ## Version
 
@@ -582,15 +595,22 @@ with `1` on an error.
 | A zone's `headers`, `redirects` and `rewrites` under its mount or aliases | Root rules belong to the shell |
 | No `proxy`/`middleware` or `instrumentation-client` in a zone | They would not run when the zone is reached from the shell |
 | A zone's `app/` holds its mount, plus root files used alone (`layout`, `not-found`, `global-error`, `global-not-found`, `error`, `loading`, `template`, `default`, CSS) | Routes outside the mount are refused |
-| No zone's mount or alias on a segment the shell's `app/` serves (route groups included) | A segment has one owner; refused at install |
+| No zone's mount or alias on a segment the shell's `app/` (route groups included), `pages/` or `public/` serves, or on the shell's `endpoints.base` | A segment has one owner; refused at install |
 | No edge runtime in a zone | Not served by Zones yet |
 | A zone's `pages/` holds its mount (`pages<mount>/`, `pages<mount>.tsx`), plus `_app`, `_document`, `_error`, `404`, `500` | Pages outside the mount, `pages/api/` among them (served at `/api/…`), are refused |
 | A zone's `public/` holds only `public/<mount>/` | Public files are served at the root, beside other zones' |
+| A zone's `serverExternalPackages` installed where the shell resolves them | Zones loads them from the shell's `node_modules` |
+| The shell and every zone built from one root (`turbopack.root`, `outputFileTracingRoot`, when set) | Zones refuses an image built from another root |
+| With the shell's `output: "export"`, every zone's too | `next-zones build` links the zones' exports into one site |
+| A package a zone shares with the shell installed once (warning) | Two copies load as two modules: a context or a client exists twice, and its components remount between them |
+| A `version` in each zone's `package.json` (warning) | `next-zones build` names the image by it, unless `--version` |
+| A zone's own not-found page: `pages/404` beside an `app/` folder, which Next never shows (warning); only `app/global-not-found` (warning: `dev` shows the shell's) | [Not found](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/concepts.md#not-found) |
+| `<ZoneUpdates />`: the shell imports `@runsnip/next-zones/client` and declares `endpoints.events`, each with the other; a Pages Router zone renders it in its `_app` (warnings) | Open tabs follow new versions; the shell's browser runtime gets every feature a zone's client code may use |
 | `env` keys with one value across zones (warning) | Composed by `dev`, a key has one value |
 | A path alias that differs between zones has the form `"prefix/*": ["folder/*"]` | The form `dev` gives each zone |
 | `.next/`, `node_modules/`, `.zones-dev/`, `.zones-store/`, `.zones-images/`, `.zones-cache/`, `.zones-app/`, `.zones-export/` ignored by git (errors); `next-env.d.ts`, `*.tsbuildinfo` (warnings) | Asked of git itself (`git check-ignore`), so any `.gitignore` in the repository, or a global one, counts |
 | **Next's and React's checks** (not with `--fast`): `eslint-config-next`'s rules on each zone's sources, or the zone's own ESLint config; then `next typegen` and `tsc --noEmit` | Neither Next nor React ships a doctor. These are their official checks: Next's plugin, React's hooks and compiler rules, and the type check `next build` runs. They run from the workspace's installs (`eslint` 9, `eslint-config-next`, `typescript`); nothing is downloaded |
-| With `--store`: `state.json` pins versions in the store, built with the shell's Next and React | Zones refuses them otherwise |
+| With `--store`: the versions `state.json` and `zones.json` pin are in the store, built with the shell's Next and React, and whole as built (their integrity, as Zones checks it) | Zones refuses them otherwise |
 | With `--url`: a Zones answers at that URL (a warning when it does not) | |
 
 ## `next-zones dev`
@@ -621,8 +641,12 @@ It composes the shell and every zone into one Next app, `<zones dir>/.zones-dev/
 **What zones must agree on, composed:**
 - **A path alias that differs between zones** must have the form `"prefix/*": ["folder/*"]`, which is what `@/*` is.
 - **An `env` key has one value** across zones.
-- **The shell's root files serve everyone.** A zone's own root layout and root `not-found` serve it when it runs alone,
-  as on Zones.
+- **The shell's root files serve everyone.** A zone's own root layout serves it when it runs alone, as on Zones.
+- **A zone's own not-found page** answers a URL under its mount that nothing serves, as on Zones: a fallback rewrite
+  of the mount (after every route and rule) reaches a page composed for it, either
+  `app/(next-zones-not-found)/<mount>/next-zones-not-found` (calling `notFound()`, whose `not-found` is the zone's
+  `app/not-found`) or `pages/<mount>/next-zones-not-found` (the zone's `pages/404` or `_error`, status 404). A zone
+  with only `app/global-not-found` gets the shell's in dev.
 
 ## `next-zones watch`
 
@@ -1058,7 +1082,8 @@ runs in parallel, and their switches take turns.
 ## What works inside a zone
 
 All of App Router's routing (dynamic and catch-all routes, groups, parallel and intercepting routes, `loading`,
-`error`, `not-found`), route handlers and metadata routes, server actions, prerendering, ISR and
+`error`, `not-found`, and the zone's own [not-found page](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/concepts.md#not-found) for a URL under its mount that
+nothing serves), route handlers and metadata routes, server actions, prerendering, ISR and
 `generateStaticParams`, revalidation across zones, `next/font`, `next/image`, [public files](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/assets.md), the shell's
 `proxy.ts`, the zone's [routing rules](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/routing-rules.md), [aliases](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/aliases.md), [instrumentation](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/instrumentation.md).
 And the [Pages Router](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/pages-router.md): static pages, `getStaticProps`, `getServerSideProps`, its own `_app` and
@@ -1322,8 +1347,10 @@ document. So a Pages Router page renders whole in its own zone's build, as it wo
 - **data**: `getStaticProps` (prerendered, `revalidate`, `notFound`), `getStaticPaths` (checked with
   `fallback: "blocking"`), `getServerSideProps`, and static pages, as in Next. A prerendered page is served as built; a
   revalidated one is written to the version's cache, never into the zone image;
-- **not found**: an unknown URL under the mount, and a page answering `notFound`, show the shell's not-found page
-  (404), as for an App Router zone: the zone's own `404`, `500` and `_error` are used when it runs alone.
+- **not found**: an unknown URL under the mount, and a page answering `notFound`, show the zone's own `pages/404` (else
+  its `_error`), in its own document, with a 404 status, as when it runs alone; a zone without one gets the shell's (see
+  [not found](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/concepts.md#not-found)). A zone that also has an `app/` folder follows the App Router: its
+  `app/not-found`, never `pages/404` (Next's rule; `next-zones doctor` warns).
 
 ## Live installs
 
@@ -1398,6 +1425,7 @@ Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router and Pages Router. Key:
 |---|---|
 | `page`, `layout`, dynamic routes, catch-all, optional catch-all, route groups, parallel routes | ✅ |
 | `loading` (streaming), `error`, `not-found` | ✅ |
+| A URL under a zone's mount that nothing serves: the zone's own not-found page (`app/not-found`, or `pages/404`), else the shell's | ✅ in every mode ([not found](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/concepts.md#not-found)) |
 | Intercepting routes (modals) | ✅ |
 | Route handlers (`route.ts`) | ✅ |
 | A zone's metadata routes (`/blog/sitemap.xml`, `/blog/opengraph-image`) | ✅ (the root `/sitemap.xml` and `/robots.txt` are the shell's) |

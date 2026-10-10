@@ -6,6 +6,7 @@
  *   (keys under a zone's mount) go to Zones' cache, which is per version; every other key (the shell's pages, fetch
  *   and unstable_cache data) goes to the shell's handler. A revalidation and a request reset reach both.
  */
+const ownKey = (key) => globalThis.__NEXT_ZONES_OWN_KEY__?.(key) ?? key;
 const isZoneKey = (key, kind) => (kind === undefined || kind === "APP_PAGE" || kind === "APP_ROUTE") && globalThis.__NEXT_ZONES_IS_ZONE_KEY__?.(key) === true;
 
 class ZonesCacheHandler {
@@ -15,8 +16,9 @@ class ZonesCacheHandler {
     this.own = Own ? new Own(options) : this.zones;
   }
   pick(key, kind) { return this.own !== this.zones && isZoneKey(key, kind) ? this.zones : this.own; }
-  get(key, ctx) { return this.pick(key, ctx?.kind).get(key, ctx); }
-  set(key, data, ctx) { return this.pick(key, data?.kind).set(key, data, ctx); }
+  /* A zone's own not-found page is cached under the zone's mount, not under the shell's /_not-found (hooks.cjs). */
+  get(key, ctx) { key = ownKey(key); return this.pick(key, ctx?.kind).get(key, ctx); }
+  set(key, data, ctx) { key = ownKey(key); return this.pick(key, data?.kind).set(key, data, ctx); }
   async revalidateTag(...args) { await Promise.all([...new Set([this.zones, this.own])].map((h) => h.revalidateTag?.(...args))); }
   resetRequestCache() { for (const h of new Set([this.zones, this.own])) h.resetRequestCache?.(); }
 }

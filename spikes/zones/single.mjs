@@ -91,6 +91,14 @@ try {
     if (r.status !== want) wrong[p] = { got: r.status, want };
   }
   seen.statuses = statuses;
+  /* A 404 under a zone's mount is the zone's own, as on Zones: shop's app/not-found; blog has none, so the shell's. */
+  const said = (body) => (/shop not found (<!-- -->)?v1/.test(body) ? "shop" : /could not be found/.test(body) ? "shell" : "other");
+  seen.notFound = {};
+  for (const [p, want] of [["/shop/nothing", "404 shop"], ["/shop/a/b", "404 shop"], ["/blog/a/b/c", "404 shell"], ["/nothing", "404 shell"]]) {
+    const r = await get(p);
+    seen.notFound[p] = `${r.status} ${said(r.body)}`;
+    if (seen.notFound[p] !== want) wrong[`notFound ${p}`] = seen.notFound[p];
+  }
   const api = await get("/blog/api/x");
   seen.api = { status: api.status, header: api.headers.get("x-zone-header"), version: JSON.parse(api.body).version };
   if (api.status !== 200 || api.headers.get("x-zone-header") !== "blog-x" || seen.api.version !== "1.0.0") wrong.api = seen.api;
@@ -129,6 +137,14 @@ try {
     await page.waitForSelector("text=zone shop");
     seen.browser = { soft: await page.evaluate(() => window.__marker === "kept"), counter: (await page.textContent("#count")) === counted, typed, errors };
     if (!seen.browser.soft || !seen.browser.counter || typed !== "typed in the zone" || errors.length) wrong.browser = seen.browser;
+    /* shop's not-found, in the shell's document: its link navigates softly. */
+    await page.goto(`${BASE}/shop/nothing`);
+    await page.waitForSelector("#title >> text=/shop not found/");
+    await page.evaluate(() => { window.__marker = "kept"; });
+    await page.click("#nf-to-live");
+    await page.waitForSelector("#title >> text=/zone shop live/");
+    seen.notFoundBrowser = { soft: await page.evaluate(() => window.__marker === "kept"), errors: errors.slice() };
+    if (!seen.notFoundBrowser.soft || errors.length) wrong.notFoundBrowser = seen.notFoundBrowser;
     await browser.close();
   }
   seen.oneApp = { outputMB: outputMB(path.join(dir, OUTPUT === "standalone" ? path.join("shell", ".next") : path.join(".zones-app", ".next"))) };
@@ -165,6 +181,6 @@ try {
   if (server && server.exitCode === null) { const exited = new Promise((r) => server.once("exit", r)); server.kill(); await exited; }
 }
 
-fs.rmSync(dir, { recursive: true, force: true });
+if (!process.env.KEEP) fs.rmSync(dir, { recursive: true, force: true });
 console.log(JSON.stringify({ ...seen, wrong }, null, 2));
 process.exit(Object.keys(wrong).length ? 1 : 0);

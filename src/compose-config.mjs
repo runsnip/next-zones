@@ -3,7 +3,8 @@
  * - transpilePackages, serverExternalPackages: united.
  * - env: united; one key with two values is refused.
  * - headers, redirects, rewrites: concatenated (zone rules stay under their mounts); the zones' aliases go first, as
- *   beforeFiles rewrites, which is how Zones serves them.
+ *   beforeFiles rewrites, which is how Zones serves them; a zone's own not-found page last, as a fallback rewrite of
+ *   its mount.
  * - turbopack.root: the folder holding every zone, so the linked zone files are inside the project.
  * - turbopack.rules: each zone's own path aliases, for its files (compose-alias-loader.cjs).
  */
@@ -70,7 +71,10 @@ export async function mergeConfigs({ shell: shellFile, zones, root, scoped, load
       return {
         beforeFiles: [...aliases, ...phases.flatMap((p) => p.beforeFiles)],
         afterFiles: phases.flatMap((p) => p.afterFiles),
-        fallback: phases.flatMap((p) => p.fallback),
+        /* Last of all: a URL under a zone's mount (or alias) that nothing served, to the page rendering its own
+           not-found page (compose.mjs). */
+        fallback: [...phases.flatMap((p) => p.fallback), ...loaded.filter((z) => z.notFound).flatMap((z) =>
+          [z.mount, ...new Set((z.aliases ?? []).map((a) => `/${a.source.split("/")[1]}`))].map((segment) => ({ source: `${segment}/:path*`, destination: z.notFound })))],
       };
     },
   };

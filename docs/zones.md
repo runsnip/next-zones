@@ -175,7 +175,8 @@ runs in parallel, and their switches take turns.
 ## What works inside a zone
 
 All of App Router's routing (dynamic and catch-all routes, groups, parallel and intercepting routes, `loading`,
-`error`, `not-found`), route handlers and metadata routes, server actions, prerendering, ISR and
+`error`, `not-found`, and the zone's own [not-found page](concepts.md#not-found) for a URL under its mount that
+nothing serves), route handlers and metadata routes, server actions, prerendering, ISR and
 `generateStaticParams`, revalidation across zones, `next/font`, `next/image`, [public files](assets.md), the shell's
 `proxy.ts`, the zone's [routing rules](routing-rules.md), [aliases](aliases.md), [instrumentation](instrumentation.md).
 And the [Pages Router](pages-router.md): static pages, `getStaticProps`, `getServerSideProps`, its own `_app` and

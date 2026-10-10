@@ -1,7 +1,8 @@
 /*
  * next-zones dev: the shell and the test zones composed into one app on `next dev`. Checks soft navigation between
  * them (the shell's client state survives), the alias, HMR in a zone and in a shared package (the page updates with no
- * reload), and how long an edit takes to show.
+ * reload), and how long an edit takes to show. A 404 under a zone's mount is the zone's own, as on Zones: shop's
+ * app/not-found (in the browser too); blog has none, so the shell's.
  */
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
@@ -56,6 +57,10 @@ try {
   await page.waitForSelector("text=badge* blog", { timeout: 30000 });
   result.sharedHmrMs = Date.now() - t0;
   result.noReload = (await page.evaluate(() => window.__marker)) === "kept";
+  const said = async (p) => { const r = await fetch(BASE + p); const t = await r.text(); return `${r.status} ${/shop not found/.test(t) ? "shop" : /could not be found/.test(t) ? "shell" : "other"}`; };
+  result.notFound = { "/shop/nothing": await said("/shop/nothing"), "/shop/a/b": await said("/shop/a/b"), "/blog/a/b/c": await said("/blog/a/b/c"), "/nothing": await said("/nothing") };
+  await page.goto(`${BASE}/shop/nothing`);
+  result.notFoundPage = await page.textContent("#title");
   await browser.close();
 } finally {
   for (const [file, original] of edits.reverse()) fs.writeFileSync(file, original);
@@ -68,4 +73,7 @@ if (!/zone blog v/.test(result.blog ?? "")) wrong.blog = result.blog;
 if (!/zone blog item/.test(result.alias ?? "")) wrong.alias = result.alias;
 if (!result.counterKept) wrong.counterKept = false;
 if (!result.noReload) wrong.noReload = false;
+const notFoundWanted = { "/shop/nothing": "404 shop", "/shop/a/b": "404 shop", "/blog/a/b/c": "404 shell", "/nothing": "404 shell" };
+for (const [p, want] of Object.entries(notFoundWanted)) if (result.notFound?.[p] !== want) wrong[`notFound ${p}`] = result.notFound?.[p];
+if (!/^shop not found/.test(result.notFoundPage ?? "")) wrong.notFoundPage = result.notFoundPage;
 console.log(JSON.stringify({ ...result, wrong, errors }, null, 2));

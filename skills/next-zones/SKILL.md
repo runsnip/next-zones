@@ -19,7 +19,8 @@ The package ships its documentation for models:
   `<!-- docs/<page>.md -->` line. Read the page for the task (configuration, cli, zones, metrics, support…) before
   answering from memory.
 
-If they are not installed, the same files are at `https://raw.githubusercontent.com/runsnip/next-zones/main/`.
+If they are not installed, the same files are at `https://next-zones.runsnip.net/llms.txt` and
+`https://next-zones.runsnip.net/llms-full.txt`.
 
 ## Before you answer
 

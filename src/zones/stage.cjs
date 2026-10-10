@@ -162,6 +162,9 @@ function createStaging(ctx) {
       instrumentationFile: info.instrumentation ? path.join(serverDir, "instrumentation.js") : null,
       dist, appPaths, routes, dynamicRoutes, actions: info.actions, prerender: info.prerender, cacheDir,
       pagePaths, pageRoutes, pageSystem, dataRoutes: info.dataRoutes ?? [], buildId,
+      /* Its own not-found page, a page of its build recorded at build (ownNotFound): it answers a URL under its mount
+         that nothing serves, as when the zone runs alone; the shell's answers for a zone without one. */
+      notFound: ["/_not-found/page", "/404", "/_error"].includes(identity.notFound) ? identity.notFound : null,
       seed: { serverDir, buildId, shellBuildId }, buildKey: key,
       timing: { verify: t1 - t0, described: !(identity.install?.format === FORMAT) },
     };

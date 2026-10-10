@@ -2,14 +2,15 @@
 /*
  * The upgrade guard: runs every Zones check against a given Next version, before that version is allowed.
  *
- *   node tools/upgrade-guard.mjs <next version> [--react <version>] [--keep]
+ *   node tools/upgrade-guard.mjs <next version> [check …] [--react <version>] [--keep]
  *
  * It copies spikes/zones to a temporary folder (no node_modules, builds, stores or caches), sets Next (and React, if
  * given), installs, builds the shells, the fixtures and the zone images, and runs check-all.mjs.
  * Zones runs only on the Next versions in src/zones/next-contract.cjs SUPPORTED; the guard lets it run on the one
  * being checked. Zones still refuses a Next whose internals it does not recognise (a hooked module moved, a function
  * gone, an unknown Turbopack runtime layout), so a check either passes or says what moved. Once every check passes,
- * add the version to SUPPORTED. --keep leaves the folder for a closer look.
+ * add the version to SUPPORTED. --keep leaves the folder for a closer look; checks named after the version run alone
+ * (all by default).
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -21,8 +22,8 @@ const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args.splice(i, i + 1 < args.length && !args[i + 1].startsWith("--") ? 2 : 1)[1] ?? true : undefined; };
 const keep = opt("keep");
 const react = opt("react");
-const [nextVersion] = args;
-if (!nextVersion) { console.error("usage: upgrade-guard.mjs <next version> [--react <version>] [--keep]"); process.exit(2); }
+const [nextVersion, ...checks] = args;
+if (!nextVersion) { console.error("usage: upgrade-guard.mjs <next version> [check …] [--react <version>] [--keep]"); process.exit(2); }
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const spike = path.join(root, "spikes", "zones");
@@ -75,12 +76,12 @@ step("build the Cache Components shell", () => runWith(nextBin, ["build"], path.
 const build = (dir, zone, version, store) => run(process.execPath, [path.join(root, "tools", "build-zone.mjs"), dir, zone, version, "--store", store]);
 step("build the zone images", () => {
   build("fixtures", "blog", "1", ".zones-store"); build("fixtures", "blog", "2", ".zones-store"); build("fixtures", "shop", "1", ".zones-store"); build("fixtures", "shop", "2", ".zones-store"); build("fixtures", "wide", "1", ".zones-store");
-  build("fixtures", "docs", "1", ".zones-store"); build("fixtures", "docs", "2", ".zones-store");
+  build("fixtures", "docs", "1", ".zones-store"); build("fixtures", "docs", "2", ".zones-store"); build("fixtures", "wiki", "1", ".zones-store");
   build("fixtures-cc", "notes", "1", ".zones-store-cc");
 });
 let report = "";
 /* Zones refuses a Next not yet in next-contract.cjs SUPPORTED: the guard is what admits it. */
 process.env.NEXT_ZONES_UNSUPPORTED_NEXT = "1";
-try { report = run(process.execPath, ["check-all.mjs"]); } catch (error) { report = `${error.stdout ?? ""}${error.stderr ?? ""}`; }
+try { report = run(process.execPath, ["check-all.mjs", ...checks]); } catch (error) { report = `${error.stdout ?? ""}${error.stderr ?? ""}`; }
 console.log(report.trim());
 finish(/all \d+ passed/.test(report) ? 0 : 1);

@@ -30,6 +30,18 @@ zone on a segment the shell already serves.
 A zone can also serve a URL **at the root**, outside its mount, such as `/post/42` for its page `/blog/42`. That is an
 [alias](aliases.md): the page still lives under the mount, and the address bar shows the root URL.
 
+## Not found
+
+A URL under a zone's mount that nothing serves (no route, file or rule of the zone), and a page of the zone answering
+`notFound`, get **the zone's own not-found page**, the one Next shows when the zone runs alone:
+
+- with an `app/` folder: its `app/not-found` (or `app/global-not-found`), in the shell's root layout. Next never shows a
+  `pages/404` in an app with an `app/` folder, so neither does next-zones;
+- with only `pages/`: its `pages/404`, else its `pages/_error`, in its own document;
+- a zone without one gets the shell's, as does every URL outside the zones.
+
+The status is 404 in every mode (Zones, one app, `next-zones dev`), and a new version of the zone brings its own.
+
 ## Version
 
 A version of a zone is **a build**, not a copy of its source. Zone images are kept in a *store* (one folder per zone

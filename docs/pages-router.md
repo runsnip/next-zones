@@ -44,8 +44,10 @@ document. So a Pages Router page renders whole in its own zone's build, as it wo
 - **data**: `getStaticProps` (prerendered, `revalidate`, `notFound`), `getStaticPaths` (checked with
   `fallback: "blocking"`), `getServerSideProps`, and static pages, as in Next. A prerendered page is served as built; a
   revalidated one is written to the version's cache, never into the zone image;
-- **not found**: an unknown URL under the mount, and a page answering `notFound`, show the shell's not-found page
-  (404), as for an App Router zone: the zone's own `404`, `500` and `_error` are used when it runs alone.
+- **not found**: an unknown URL under the mount, and a page answering `notFound`, show the zone's own `pages/404` (else
+  its `_error`), in its own document, with a 404 status, as when it runs alone; a zone without one gets the shell's (see
+  [not found](concepts.md#not-found)). A zone that also has an `app/` folder follows the App Router: its
+  `app/not-found`, never `pages/404` (Next's rule; `next-zones doctor` warns).
 
 ## Live installs
 
