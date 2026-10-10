@@ -15,11 +15,14 @@
 | `next-zones pull <zone> <version> --url <zones url> [--base /_next-zones]` | Pings a running Zones to pull it from its sources: only a zone that allows [live pulls](zones.md#live-pulls) |
 | `next-zones prune --store <dir> [--keep 2] [--pins zones.json] [--cache <dir>] [--dry-run]` | [Prunes](zones.md#pruning) a store no Zones runs on (refused while one does) |
 | `next-zones prune --url <zones url> [--base /_next-zones] [--keep 2] [--dry-run]` | Asks a running Zones to prune its store |
-| `next-zones install <zone> <version> [--url http://127.0.0.1:3000] [--base /_next-zones]` | Asks a running Zones service to install, swap to or roll back to a version |
+| `next-zones install <zone> <version> [--url http://127.0.0.1:3000] [--base /_next-zones]` | Asks a running Zones service to install, swap to or roll back to a version (a stopped zone stays stopped) |
+| `next-zones zones [--url http://127.0.0.1:3000] [--base /_next-zones] [--json]` | Every zone of a running Zones and its state: serving, stopped, failed, available ([zones and their state](zones.md#zones-and-their-state)) |
+| `next-zones stop <zone> [--url http://127.0.0.1:3000] [--base /_next-zones]` | [Stops](zones.md#stopping-a-zone) a zone: its URLs answer 404, it stays installed |
+| `next-zones resume <zone> [--url http://127.0.0.1:3000] [--base /_next-zones]` | Resumes a stopped zone, with no install |
 | `next-zones dev <zones dir> [--port 3000]` | Develops every zone at once: one `next dev`, with HMR and soft navigation (below) |
 | `next-zones watch <zones dir> <zone> [more zones…] [--url http://127.0.0.1:3000] [--base /_next-zones] [--store <dir>]` | Rebuilds zones on every change and installs them on a running Zones service (below) |
 
-`start`, `serve`, `install`, `pull`, `prune` and `watch` read the admin token from `NEXT_ZONES_ADMIN_TOKEN`. When the
+`start`, `serve`, `install`, `zones`, `stop`, `resume`, `pull`, `prune` and `watch` read the admin token from `NEXT_ZONES_ADMIN_TOKEN`. When the
 server has a token, a command must send the same one, even from the same machine: the loopback rule holds only with
 no token configured.
 
@@ -175,6 +178,7 @@ with `1` on an error.
 | **Next's and React's checks** (not with `--fast`): `eslint-config-next`'s rules on each zone's sources, or the zone's own ESLint config; then `next typegen` and `tsc --noEmit` | Neither Next nor React ships a doctor. These are their official checks: Next's plugin, React's hooks and compiler rules, and the type check `next build` runs. They run from the workspace's installs (`eslint` 9, `eslint-config-next`, `typescript`); nothing is downloaded |
 | The shell's MCP server (`zoneConfig({ mcp })`): `Metrics()` with metrics on; its path under no route of the shell and no zone's mount; `@runsnip/jwks` installed for `OAuth(…)`, unless `Mcp({ jwks })` (errors); a `Bearer({ env })` whose variable is set, not mode `"single"` (warnings) | Zones refuses to start otherwise |
 | With `--store`: the versions `state.json` and `zones.json` pin are in the store, built with the shell's Next and React, and whole as built (their integrity, as Zones checks it) | Zones refuses them otherwise |
+| With `--store`: a zone `state.json` records as stopped (warning) | Its URLs answer 404, after a restart too |
 | With `--url`: a Zones answers at that URL (a warning when it does not) | |
 
 ## `next-zones dev`

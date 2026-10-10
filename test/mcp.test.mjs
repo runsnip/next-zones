@@ -18,6 +18,9 @@ const fakeZones = () => {
     pull: async (zone, version) => { calls.push(["pull", zone, version]); if (zone === "shop") throw new ZoneError(`zone "shop" does not allow live pulls`); return { pulledFrom: "dir" }; },
     install: async (zone, version) => { calls.push(["install", zone, version]); return { zone, version, switchUs: 3 }; },
     prune: async () => ({ removed: [] }),
+    zones: () => ({ blog: { state: "serving", version: "1", mount: "/blog" } }),
+    stop: async (zone) => { calls.push(["stop", zone]); return { name: zone, version: "1", state: "stopped", changed: true }; },
+    resume: async (zone) => { calls.push(["resume", zone]); return { name: zone, version: "1", state: "serving", changed: true }; },
   };
 };
 
@@ -44,7 +47,7 @@ test("Mcp, Tools, Tool: descriptions are checked when the config loads", () => {
   assert.throws(() => Mcp({ tools: Tools(LivePull(), LivePull({ tools: ["status"] })) }), /two tools are named zones_status/);
   assert.throws(() => Bearer({ token: "short" }), /16 characters/);
   assert.throws(() => OAuth({ issuer: "http://auth.example.com" }), /https/);
-  assert.equal(Mcp({ tools: Tools(LivePull()) }).tools.length, 4);
+  assert.equal(Mcp({ tools: Tools(LivePull()) }).tools.length, 6);
 });
 
 test("the JSON Schema check names each problem", () => {
@@ -59,7 +62,8 @@ test("initialize, tools/list, Zones' own tools and the owner's, from this machin
   const s = await serve(Mcp({ tools: Tools(LivePull(), Tool({
     name: "echo", description: "Echoes", input: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
     handler: (args, context) => { seen.zones = Object.keys(context.zones); seen.auth = context.auth.scheme; return { echoed: args.text }; },
-  }), Tool({ name: "reader", description: "Reads Zones", zones: ["read"], handler: (args, { zones }) => ({ keys: Object.keys(zones), status: zones.status() }) })) }));
+  }), Tool({ name: "reader", description: "Reads Zones", zones: ["read"], handler: (args, { zones }) => ({ keys: Object.keys(zones), status: zones.status() }) }),
+  Tool({ name: "pauser", description: "Stops and resumes", zones: ["stop"], handler: async ({ zone }, { zones }) => ({ keys: Object.keys(zones), stopped: await zones.stop(zone) }) })) }));
   try {
     const init = await s.rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } });
     assert.equal(init.body.result.protocolVersion, "2025-06-18");
@@ -67,7 +71,7 @@ test("initialize, tools/list, Zones' own tools and the owner's, from this machin
     const unknownVersion = await s.rpc("initialize", { protocolVersion: "1999-01-01" });
     assert.equal(unknownVersion.body.result.protocolVersion, "2025-11-25");
     const listed = await s.rpc("tools/list", {});
-    assert.deepEqual(listed.body.result.tools.map((t) => t.name), ["zones_status", "zones_images", "zones_pull", "zones_install", "echo", "reader"]);
+    assert.deepEqual(listed.body.result.tools.map((t) => t.name), ["zones_status", "zones_images", "zones_pull", "zones_install", "zones_stop", "zones_resume", "echo", "reader", "pauser"]);
     const images = await s.rpc("tools/call", { name: "zones_images", arguments: { zone: "blog" } });
     assert.deepEqual(images.body.result.structuredContent, { zones: { blog: [{ version: "1", active: true, livePull: true }] } });
     const installed = await s.rpc("tools/call", { name: "zones_install", arguments: { zone: "blog", version: "2" } });
@@ -84,7 +88,15 @@ test("initialize, tools/list, Zones' own tools and the owner's, from this machin
     /* An owner's tool reaches Zones only as far as it declares: none by default, reading with zones: ["read"]. */
     assert.deepEqual(seen, { zones: [], auth: "admin" });
     const reader = await s.rpc("tools/call", { name: "reader", arguments: {} });
-    assert.deepEqual(reader.body.result.structuredContent.keys, ["status", "images", "metrics"]);
+    assert.deepEqual(reader.body.result.structuredContent.keys, ["status", "images", "zones", "metrics"]);
+    /* Stopping and resuming: Zones' own tools, and an owner's with zones: ["stop"]. */
+    const stopped = await s.rpc("tools/call", { name: "zones_stop", arguments: { zone: "blog" } });
+    assert.equal(stopped.body.result.structuredContent.state, "stopped");
+    const resumed = await s.rpc("tools/call", { name: "zones_resume", arguments: { zone: "blog" } });
+    assert.equal(resumed.body.result.structuredContent.state, "serving");
+    const pauser = await s.rpc("tools/call", { name: "pauser", arguments: { zone: "blog" } });
+    assert.deepEqual(pauser.body.result.structuredContent.keys, ["stop", "resume"]);
+    assert.deepEqual(s.zones.calls.filter((c) => c[0] === "stop" || c[0] === "resume"), [["stop", "blog"], ["resume", "blog"], ["stop", "blog"]]);
     assert.equal((await s.rpc("nope/nothing", {})).body.error.code, -32601);
     /* Notifications: 202, no body. GET: 405. */
     const note = await fetch(s.base + s.path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) });

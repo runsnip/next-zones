@@ -5,6 +5,8 @@
  *
  *   node check-all.mjs [check …]       (all checks by default; the builds must exist: build-zone.sh, next build)
  *   VERBOSE=1 prints a failed check's output, SHOW=1 every check's; a failed check's output and Zones' log are kept in check-logs/.
+ *   TIMEOUT_SCALE=3 gives every check three times its time (a machine busy with other work); a check that runs out of
+ *   time says so.
  */
 import { spawn, execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -12,7 +14,7 @@ import os from "node:os";
 import path from "node:path";
 
 const CHECKS = ["browse", "features", "bound", "swap", "links", "alias", "media", "routing", "rules", "routes", "proxy",
-  "revalidate", "instrumentation", "shared", "concurrent", "swapload", "signal", "external", "params", "miss", "many", "cc", "sharedver", "context", "standalone", "composed", "doctor", "init", "contract", "collect", "integrity", "health", "pull", "endpoints", "endpointsoff", "endpointsbase", "localdeps", "prune", "release", "single", "singlestandalone", "singleexport", "zonesstandalone", "zonesexport", "ownhandler", "reclaim", "lrumem", "isrswap", "widths", "leak", "metrics", "pagesrouter", "composedpages", "singlepages", "singlepagesstandalone", "notfound", "mcp"];
+  "revalidate", "instrumentation", "shared", "concurrent", "swapload", "signal", "external", "params", "miss", "many", "cc", "sharedver", "context", "standalone", "composed", "doctor", "init", "contract", "collect", "integrity", "health", "pull", "endpoints", "endpointsoff", "endpointsbase", "localdeps", "prune", "release", "single", "singlestandalone", "singleexport", "zonesstandalone", "zonesexport", "ownhandler", "reclaim", "lrumem", "isrswap", "widths", "leak", "metrics", "pagesrouter", "composedpages", "singlepages", "singlepagesstandalone", "notfound", "mcp", "stop"];
 /* Checks that need their own setup: the environment for Zones and the check. */
 const SETUP = {
   /* A non-public env variable only the server may read (leak.mjs looks for it in everything a browser can fetch). */
@@ -116,8 +118,8 @@ for (const name of chosen) {
   const env = SETUP[name]?.() ?? {};
   const server = await startZones(env);
   let output = "", code = 0;
-  try { output = execFileSync(process.execPath, [`${name}.mjs`], { encoding: "utf8", timeout: TIMEOUT[name] ?? 120_000, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...env } }); }
-  catch (error) { code = error.status ?? 1; output = `${error.stdout ?? ""}${error.stderr ?? ""}`; }
+  try { output = execFileSync(process.execPath, [`${name}.mjs`], { encoding: "utf8", timeout: (TIMEOUT[name] ?? 120_000) * Number(process.env.TIMEOUT_SCALE ?? 1), stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...env } }); }
+  catch (error) { code = error.status ?? 1; output = `${error.stdout ?? ""}${error.stderr ?? ""}${error.signal === "SIGTERM" ? "\nnext-zones check: out of time (TIMEOUT_SCALE gives more)" : ""}`; }
   server.kill();
   await new Promise((r) => server.once("exit", r));
   /* Only a store copied into the temporary directory is removed, never a store of the workspace. */
@@ -128,7 +130,8 @@ for (const name of chosen) {
   const wrong = /"wrong":\s*\{\s*"/.test(output) ? 1 : 0;                // any non-empty "wrong" map
   const ok = code === 0 && !pageErrors && !wrong && logErrors.length === 0;
   if (!ok) failed++;
-  console.log(`${ok ? "✓" : "✗"} ${name.padEnd(16)}${ok ? "" : ` exit ${code}${pageErrors ? ", page errors" : ""}${wrong ? ", wrong responses" : ""}${logErrors.length ? `, Zones log: ${logErrors.slice(0, 2).join(" | ")}` : ""}`}`);
+  const outOfTime = output.includes("next-zones check: out of time");
+  console.log(`${ok ? "✓" : "✗"} ${name.padEnd(16)}${ok ? "" : ` exit ${code}${outOfTime ? ", out of time" : ""}${pageErrors ? ", page errors" : ""}${wrong ? ", wrong responses" : ""}${logErrors.length ? `, Zones log: ${logErrors.slice(0, 2).join(" | ")}` : ""}`}`);
   if ((!ok && process.env.VERBOSE) || process.env.SHOW) console.log(output.slice(0, 4000));
   /* A failed check's output and Zones' log are kept, so a failure seen once can still be read (check-logs/). */
   if (!ok) {

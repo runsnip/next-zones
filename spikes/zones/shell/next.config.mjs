@@ -19,8 +19,9 @@ export default zoneConfig({
         input: { type: "object", properties: { zone: { type: "string" } } },
         zones: ["read"],
         handler: ({ zone }, { zones }) => {
-          const active = zones.status().zones;
-          return zone ? { [zone]: active[zone] ?? null } : active;
+          const all = zones.zones();
+          const version = (name) => (all[name]?.state === "serving" ? all[name].version : null);
+          return zone ? { [zone]: version(zone) } : Object.fromEntries(Object.keys(all).map((name) => [name, version(name)]));
         },
       }),
     ),

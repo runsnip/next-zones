@@ -2,7 +2,8 @@
  * Zones' MCP server, declared in the shell's zoneConfig (shell/next.config.mjs), with every endpoint off
  * (NEXT_ZONES_ENDPOINTS=off): MCP is Zones' own, at /_next-zones/mcp, whatever endpoints are declared. Over HTTP, as a
  * client does: initialize; the tools (Zones' own and the shell's); zones_install installs blog 1 then swaps to 2 and
- * rolls back, the page following each time; zones_pull of a zone without livePull is refused, of blog (livePull) is
+ * rolls back, the page following each time; zones_status lists blog serving; zones_stop makes /blog answer a marked
+ * 404 and zones_resume serves it again; zones_pull of a zone without livePull is refused, of blog (livePull) is
  * tried; zones_metrics; the shell's tool, reading Zones as it declared; next-zones' skill as a resource and a prompt; a
  * browser origin refused; and the admin endpoints answering 404, as declared off.
  */
@@ -27,6 +28,13 @@ seen.afterV2 = { ok: !v2.isError, page: await page("/blog") };
 const back = await call("zones_install", { zone: "blog", version: "1" });
 seen.rolledBack = { ok: !back.isError, page: await page("/blog") };
 seen.status = (await call("zones_status")).structuredContent?.zones;
+/* Stopped through MCP: blog's URLs answer 404, marked; resumed: it serves again. */
+const stopped = await call("zones_stop", { zone: "blog" });
+const blogStopped = await fetch(`${BASE}/blog`);
+seen.stopped = { ok: !stopped.isError, state: stopped.structuredContent?.state, status: blogStopped.status, marked: blogStopped.headers.get("x-next-zones-state"),
+  listed: (await call("zones_status")).structuredContent?.zones?.blog?.state };
+const resumed = await call("zones_resume", { zone: "blog" });
+seen.resumed = { ok: !resumed.isError, state: resumed.structuredContent?.state, page: await page("/blog") };
 seen.images = Object.keys((await call("zones_images")).structuredContent?.zones ?? {});
 const shopPull = await call("zones_pull", { zone: "shop", version: "99" });
 seen.shopPull = { isError: shopPull.isError, text: shopPull.content[0].text };
@@ -43,11 +51,13 @@ seen.adminEndpoint = (await fetch(`${BASE}/_next-zones/images`)).status;
 
 const wrong = {};
 if (seen.initialize.version !== "2025-11-25" || seen.initialize.server !== "next-zones" || !seen.initialize.capabilities.includes("resources")) wrong.initialize = seen.initialize;
-for (const t of ["zones_status", "zones_images", "zones_pull", "zones_install", "zones_metrics", "shell_versions"]) if (!seen.tools.includes(t)) wrong.tools = seen.tools;
+for (const t of ["zones_status", "zones_images", "zones_pull", "zones_install", "zones_stop", "zones_resume", "zones_metrics", "shell_versions"]) if (!seen.tools.includes(t)) wrong.tools = seen.tools;
 if (!seen.afterV1.ok || seen.afterV1.page !== "zone blog v1") wrong.afterV1 = seen.afterV1;
 if (!seen.afterV2.ok || seen.afterV2.page !== "zone blog v2") wrong.afterV2 = seen.afterV2;
 if (!seen.rolledBack.ok || seen.rolledBack.page !== "zone blog v1") wrong.rolledBack = seen.rolledBack;
-if (seen.status?.blog !== "1") wrong.status = seen.status;
+if (seen.status?.blog?.version !== "1" || seen.status?.blog?.state !== "serving" || seen.status?.blog?.mount !== "/blog") wrong.status = seen.status;
+if (!seen.stopped.ok || seen.stopped.state !== "stopped" || seen.stopped.status !== 404 || seen.stopped.marked !== "stopped" || seen.stopped.listed !== "stopped") wrong.stopped = seen.stopped;
+if (!seen.resumed.ok || seen.resumed.state !== "serving" || seen.resumed.page !== "zone blog v1") wrong.resumed = seen.resumed;
 if (!seen.images.includes("blog")) wrong.images = seen.images;
 if (!seen.shopPull.isError || !/live pull/i.test(seen.shopPull.text)) wrong.shopPull = seen.shopPull;
 if (!seen.blogPull.isError || /live pull/i.test(seen.blogPull.text)) wrong.blogPull = seen.blogPull;

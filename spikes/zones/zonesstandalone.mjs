@@ -76,7 +76,7 @@ try {
   const mcp = async (method, params = {}) => (await (await fetch(`${BASE}/_next-zones/mcp`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).json());
   seen.mcp = {
     greet: (await mcp("tools/call", { name: "greet", arguments: { who: "you" } })).result?.content?.[0]?.text,
-    status: (await mcp("tools/call", { name: "zones_status", arguments: {} })).result?.structuredContent?.zones?.blog,
+    status: (await mcp("tools/call", { name: "zones_status", arguments: {} })).result?.structuredContent?.zones?.blog?.version,
     skill: (await mcp("resources/read", { uri: "skill://release/SKILL.md" })).result?.contents?.[0]?.text?.includes("# Release a zone"),
   };
   /* next-zones' dependency, @runsnip/jwks (OAuth), in the folder beside it. */

@@ -28,7 +28,9 @@ any tool that reads that format at it. Nothing is pushed anywhere.
 | `nextzones_install_blocked_seconds` | histogram | `zone` | The longest the event loop was held during an install |
 | `nextzones_pull_seconds` | histogram | `zone`, `via`, `outcome` | Pulls of a zone image from a source |
 | `nextzones_pruned_images_total`, `nextzones_pruned_bytes_total` | counter | | What pruning removed |
-| `nextzones_zone_active` | gauge | `zone`, `version` | 1 for the version that serves; 0 once a swap replaced it |
+| `nextzones_zone_active` | gauge | `zone`, `version` | 1 for the version that serves; 0 once a swap replaced it, or the zone stopped |
+| `nextzones_zone_stopped` | gauge | `zone` | 1 while the zone is [stopped](zones.md#stopping-a-zone); 0 once it serves again |
+| `nextzones_stopped_requests_total` | counter | `zone` | Requests answered 404 because their zone is stopped (also counted in `nextzones_requests_total`, under the zone, `4xx`) |
 | `nextzones_registry_modules` | gauge | | Server modules shared across builds |
 | `nextzones_registry_shared_total` | counter | | Times a build used a module another build had loaded |
 | `nextzones_reclaims_total` | counter | | Last-resort collections after a version was collected |

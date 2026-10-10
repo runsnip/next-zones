@@ -120,12 +120,15 @@ machine (a loopback address).
 | Group | Endpoint | What it does |
 |---|---|---|
 | `events` | `GET <base>/events` | The swap events [`<ZoneUpdates />`](updates.md) listens to: only zone names and versions. Public |
-| `health` | `GET <base>/health` | Public: 200 `{ ok, degraded }` once Zones serves, for a supervisor such as Docker's `HEALTHCHECK`. A zone that failed at boot makes it `degraded`, not unhealthy: a restart would not fix its build. An admin also gets the active versions, the boot failures, uptime and RSS |
-| `admin` (every endpoint of the group needs the admin token) | `GET <base>/images` | The zone images in the store, by zone: version, active or not, live pull, built with, integrity |
+| `health` | `GET <base>/health` | Public: 200 `{ ok, degraded }` once Zones serves, for a supervisor such as Docker's `HEALTHCHECK`. A zone that failed at boot makes it `degraded`, not unhealthy: a restart would not fix its build. An admin also gets every zone and its state ([below](#zones-and-their-state)), the boot failures, uptime and RSS |
+| `admin` (every endpoint of the group needs the admin token) | `GET <base>/zones` | Every zone and its state: `{ zones }` ([below](#zones-and-their-state)) |
+| | `POST <base>/zones/<zone>/stop` | [Stops](#stopping-a-zone) the zone: its URLs answer 404, it stays installed. 200 `{ name, version, state, changed, ms }` |
+| | `POST <base>/zones/<zone>/resume` | Resumes it: the version it has installed serves again, with no install. 200, as for stop |
+| | `GET <base>/images` | The zone images in the store, by zone: version, installed or not (`active`), live pull, built with, integrity |
 | | `GET <base>/images/<zone>/<version>` | One zone image |
 | | `POST <base>/images/<zone>/<version>/pull` | Asks Zones to pull it from its sources into the store, without installing it: 200 `{ pulledFrom }` (`null` when it was there); 409 with the reason when refused. A ping: only for a zone that allows [live pulls](#live-pulls) |
 | | `POST <base>/images/<zone>/<version>/install` | Installs, swaps to or rolls back to it, pulled first (as a ping) when the store lacks it: 200 with the timings; 409 with the reason when refused (nothing changes) |
-| | `DELETE <base>/images/<zone>/<version>` | Removes it from the store. Never the active version; one whose code other versions still share is refused until a restart |
+| | `DELETE <base>/images/<zone>/<version>` | Removes it from the store. Never the installed version (serving or stopped); one whose code other versions still share is refused until a restart |
 | | `POST <base>/prune?keep=2[&dry=1]` | [Prunes](#pruning) the store: `{ removed, held, kept, freedBytes }`. `dry=1` only says what it would do |
 | | `POST <base>/collect?keep=2` | Collects old versions' loaded code and disk caches (not their images), keeping the active one and `keep` before it per zone |
 | | `POST <base>/policy` | Replaces the instrumentation policy in the running Zones (not the file): the body is the JSON of [`zones.config.json`](instrumentation.md#the-policy), `{ "instrumentation": { … } }`, and replaces the whole policy (what it leaves out is back to the default); 200 with the policy now in force |
@@ -150,6 +153,108 @@ Under load, with 32 clients and 18 swaps, no request got a wrong answer.
 
 A rollback is the same operation with the previous version. Installs can run at the same time: their heavy work
 runs in parallel, and their switches take turns.
+
+## Stopping a zone
+
+A zone can be taken out of serving while Zones runs, and brought back, with no install and no restart:
+
+```sh
+next-zones stop blog          # every URL of blog answers 404
+next-zones resume blog        # blog serves again, the version it has installed
+next-zones zones              # every zone and its state
+```
+
+From code, `zones.stop("blog")` and `zones.resume("blog")`; over HTTP, `POST <base>/zones/blog/stop` and `/resume`
+(admin); for an assistant, the MCP tools `zones_stop` and `zones_resume` ([Zones as an MCP server](mcp.md)).
+
+- **Every URL of the zone answers 404:** under its mount, its aliases, its route handlers and server actions, its
+  Pages Router pages and their `/_next/data`. The page is the shell's not-found (to an RSC request, its payload, so a
+  soft navigation shows it). The zone's code does not run, its own not-found page included.
+- **Where the 404 comes from** is on the response: `x-next-zones-state: stopped` and `x-next-zones-zone: blog` (for
+  logs, a proxy, `curl -I`), and the same in `Server-Timing`, which the browser hands to the page. The shell's
+  not-found page tells the two 404s apart with `useZoneState()`, and stays static:
+
+  ```tsx
+  // shell/app/not-found.tsx
+  "use client";
+  import { useZoneState } from "@runsnip/next-zones/client";
+
+  export default function NotFound() {
+    const zone = useZoneState();          // { zone: "blog", state: "stopped" }, or null
+    return zone ? <p>{zone.zone} is not available right now.</p> : <p>This page could not be found.</p>;
+  }
+  ```
+
+  It reads the response the page came with (a page load), or the one a soft navigation fetched, once the page has
+  hydrated. The two headers are also on the request the not-found page renders for, but reading them there
+  (`headers()`) makes every route of the shell dynamic: Next renders the root not-found inside every route, and a
+  build with it turned `/`, `/login` and an ISR page of the test shell from static (`○`) to dynamic (`ƒ`). Only Zones
+  sets these headers: a client's own `x-next-zones-*` are removed.
+- **One switch,** the install's, with nothing in the zone's place: its routes, rules, aliases and segments go out in
+  one synchronous step, about 4 µs; resuming switches the same build back in, about 5 µs
+  ([measured](#stop-and-resume-measured)). Open tabs with [`<ZoneUpdates />`](updates.md) are told: their next navigation
+  into the zone shows the 404.
+- **It stays installed:** its build stays loaded, its image is never pruned, and its static files are still served,
+  for a tab that loaded the zone before it stopped.
+- **The shell's proxy** runs, for `/_not-found`: a rule matching the zone's path does not see the request. A URL the
+  proxy (or a rewrite) sends into a stopped zone answers the same 404, marked.
+- **A version installed while the zone is stopped** replaces the stopped one and stays stopped (the install's result
+  says `state: "stopped"`); resuming serves it. A rollback works the same way.
+- **Across restarts:** `state.json` records the stopped zones, and a restart keeps them stopped, unless newer pins
+  replace the state ([pins and the store's state](cli.md)).
+- **Measured:** `nextzones_zone_stopped{zone}` is 1 while a zone is stopped; `nextzones_stopped_requests_total{zone}`
+  counts the requests answered 404 for it ([metrics](metrics.md)).
+
+### Zones and their state
+
+`zones.zones()`, `GET <base>/zones`, the admin part of `<base>/health`, `next-zones zones --json` and the MCP tool
+`zones_status` tell every zone the same way:
+
+```json
+{
+  "blog": { "state": "serving", "version": "1.4.0", "mount": "/blog", "aliases": ["/post/:id"], "livePull": true,
+            "since": "2026-10-10T10:12:03.000Z", "previous": "1.3.2" },
+  "shop": { "state": "stopped", "version": "4", "mount": "/shop", "aliases": [], "livePull": false,
+            "since": "2026-10-10T11:02:40.000Z", "previous": null },
+  "docs": { "state": "failed", "version": "2", "error": "zone \"docs\" 2 was not built for Zones (…)" },
+  "wiki": { "state": "available", "versions": ["1", "2"] }
+}
+```
+
+| `state` | |
+|---|---|
+| `serving` | Its URLs are served. `since`: when it last started serving; `previous`: the version installed before, a rollback's target |
+| `stopped` | Its URLs answer 404; it stays installed. `since`: when it stopped |
+| `failed` | It failed to install at boot, with the reason; Zones serves the rest |
+| `available` | Images in the store, never installed in this process |
+
+### Stop and resume, measured
+
+Node 24.16, Apple M1, measured 2026-10-10 with `node tools/bench/stop.mjs` against the test workspace's Zones (the
+shell, blog, shop and wiki serving; blog stopped and resumed 200 times after 20), on a machine busy with other work
+(load average 65 to 100). The reference is an install's switch, measured the same way at the same time (40 installs
+alternating two versions already loaded):
+
+| The switch | p50 | p99 |
+|---|---|---|
+| Stop | 4 µs | 10 µs |
+| Resume | 5 µs | 91 µs |
+| An install (the reference) | 9.7 µs | 16.9 µs |
+
+**What a stopped zone costs every other request.** While a zone is stopped, Zones asks each request's path whether a
+stopped zone owns it (`node tools/bench/stopped-lookup.mjs`, median of 15 batches of 100 000 calls, three aliases per
+stopped zone):
+
+| Stopped zones | Per request |
+|---|---|
+| 0 | about 5 ns (nothing is asked) |
+| 1 | 35 to 45 ns |
+| 10 | 45 to 80 ns |
+
+The path's first segment is walked in a trie by character code, so a path no stopped zone owns usually stops at its
+first character. Matching every alias's pattern instead, the first version, cost 367 ns with one zone stopped and
+2.7 µs with ten. What remains is a map lookup per character of the first segment and the alias patterns of a segment
+that does match.
 
 ## What a user notices
 

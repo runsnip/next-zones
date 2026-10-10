@@ -6,7 +6,10 @@
  *   events  GET  <base>/events                         swap events for <ZoneUpdates />, public
  *   health  GET  <base>/health                         200 once Zones serves; details for an admin
  *   metrics GET  <base>/metrics                        Prometheus text, to an admin, with zoneConfig({ metrics: true })
- *   admin   GET  <base>/images                          the zone images in the store, by zone, with the active version
+ *   admin   GET  <base>/zones                           every zone and its state: serving, stopped, failed, available
+ *           POST <base>/zones/<zone>/stop               stops a zone: its URLs answer 404, it stays installed
+ *           POST <base>/zones/<zone>/resume             resumes it: the build it had serves again, with no install
+ *           GET  <base>/images                          the zone images in the store, by zone, with the installed version
  *           GET  <base>/images/<zone>/<version>         one zone image: built with, live pull, integrity
  *           POST <base>/images/<zone>/<version>/pull    Zones pulls it from its sources (a ping: the zone must allow live pulls)
  *           POST <base>/images/<zone>/<version>/install installs, swaps to or rolls back to it (pulled first, as a ping,
@@ -39,7 +42,7 @@ function createEndpoints(ctx, { installer, collector, bench, debugInfo }) {
   const NAME = /^[a-z0-9][a-z0-9-]*$/, VERSION = /^[A-Za-z0-9._-]+$/;
   const readIdentity = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, "zone.json"), "utf8")); } catch { return null; } };
   const summary = (identity) => ({
-    version: identity.version, active: ctx.zones.get(identity.name)?.version === identity.version, livePull: identity.livePull === true,
+    version: identity.version, active: ctx.installedZone(identity.name)?.version === identity.version, livePull: identity.livePull === true,
     built: identity.built, integrity: identity.integrity ? { digest: identity.integrity.digest, files: identity.integrity.files } : null,
   });
 
@@ -55,7 +58,7 @@ function createEndpoints(ctx, { installer, collector, bench, debugInfo }) {
   }
 
   async function remove(zone, version) {
-    if (ctx.zones.get(zone)?.version === version) throw new ZoneError(`zone "${zone}" ${version} is active: install another version first`);
+    if (ctx.installedZone(zone)?.version === version) throw new ZoneError(`zone "${zone}" ${version} is ${ctx.stopped.has(zone) ? "installed (stopped)" : "active"}: install another version first`);
     const dir = path.join(ctx.store, zone, version);
     if (!fs.existsSync(path.join(dir, "zone.json"))) return false;
     /* Loaded once (a rollback target): unloaded first, unless Zones still shares modules it instantiated (D9). */
@@ -70,6 +73,14 @@ function createEndpoints(ctx, { installer, collector, bench, debugInfo }) {
     try {
       /* With debug on and admin not declared, only debug and bench. */
       if (!declared.admin && sub !== "/debug" && sub !== "/bench") return json(res, 404, { error: "not found" });
+      if (sub === "/zones" && req.method === "GET") return json(res, 200, { zones: installer.describe() });
+      const zoneAction = /^\/zones\/([^/]+)\/(stop|resume)$/.exec(sub);
+      if (zoneAction) {
+        const [, zone, action] = zoneAction;
+        if (!NAME.test(zone)) return json(res, 400, { error: "a zone name is expected" });
+        if (req.method !== "POST") return json(res, 405, { error: `${req.method} is not supported here` });
+        return json(res, 200, await installer[action](zone));
+      }
       if (sub === "/images" && req.method === "GET") return json(res, 200, { zones: list() });
       const image = /^\/images\/([^/]+)\/([^/]+)(\/install|\/pull)?$/.exec(sub);
       if (image) {
@@ -117,12 +128,13 @@ function createEndpoints(ctx, { installer, collector, bench, debugInfo }) {
     req.on("close", () => { clearInterval(keepAlive); ctx.listeners.delete(res); });
   }
 
-  /* What Zones serves now: the active versions, the zones that failed at boot, uptime and memory. */
+  /* What Zones serves now: every zone and its state (installer.describe), the zones that failed at boot, uptime and
+     memory. */
   function status() {
     const failed = Object.entries(installer.boot()).filter(([, r]) => !r.ok).map(([zone, r]) => ({ zone, version: r.version, error: r.error }));
     return {
       ok: true, degraded: failed.length > 0, failed,
-      zones: Object.fromEntries([...ctx.zones.values()].map((z) => [z.name, z.version])),
+      zones: installer.describe(),
       uptimeS: Math.round(process.uptime()), rssMB: +(process.memoryUsage().rss / 1048576).toFixed(1), reclaimed: ctx.reclaimed,
     };
   }

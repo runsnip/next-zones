@@ -26,6 +26,12 @@
  *                                                   asks a running Zones to prune its store
  *   install <zone> <version> [--url http://127.0.0.1:3000] [--base /_next-zones]
  *                                                   asks a running Zones service to install (swap to, roll back to) a version
+ *   zones [--url http://127.0.0.1:3000] [--base /_next-zones] [--json]
+ *                                                   every zone of a running Zones and its state
+ *   stop <zone> [--url http://127.0.0.1:3000] [--base /_next-zones]
+ *                                                   stops a zone: its URLs answer 404, it stays installed
+ *   resume <zone> [--url http://127.0.0.1:3000] [--base /_next-zones]
+ *                                                   resumes a stopped zone, with no install
  *   doctor <dir> [more dirs…] [--store <dir>] [--url <zones url>] [--fast]
  *                                                   checks a workspace from source: what Zones and dev need
  *   dev <zones dir> [--port 3000]                   the shell and its zones as one app on `next dev`: HMR, soft navigation
@@ -76,13 +82,15 @@ else if (command === "build") await build();
 else if (command === "serve") await serve();
 else if (command === "start") await start();
 else if (command === "install") await installOnZones();
+else if (command === "zones") await listZones();
+else if (command === "stop" || command === "resume") await stopOrResume(command);
 else if (command === "pack") await pack();
 else if (command === "pull") await pull();
 else if (command === "prune") await prune();
 else if (command === "doctor") await runDoctor();
 else if (command === "dev") await runDev();
 else if (command === "watch") await runWatch();
-else usage("init | add | check | doctor | dev | build | start | serve | install | pack | pull | prune | watch   (see https://github.com/runsnip/next-zones/blob/main/docs/cli.md)");
+else usage("init | add | check | doctor | dev | build | start | serve | install | zones | stop | resume | pack | pull | prune | watch   (see https://github.com/runsnip/next-zones/blob/main/docs/cli.md)");
 
 async function runInit() {
   const noInstall = rest.includes("--no-install");
@@ -233,7 +241,7 @@ async function serve() {
   const server = createZones(options);
   await server.listen(port, host);
   console.log(`next-zones: Zones on http://${host}:${port}, shell ${path.resolve(shell)}`);
-  for (const [zone, { version }] of Object.entries(server.zones())) console.log(`  ${zone} ${version}`);
+  for (const [zone, z] of Object.entries(server.zones())) console.log(`  ${zone} ${z.version ?? z.versions?.join(", ")} ${z.state}`);
 }
 
 async function pack() {
@@ -302,7 +310,33 @@ async function installOnZones() {
   });
   const body = await res.json();
   if (!res.ok) { console.error(`✗ ${body.refused ?? body.failed ?? body.error ?? res.status}`); process.exit(1); }
-  console.log(`✓ ${zone} ${version} installed: switch ${(body.t.activate * 1000).toFixed(1)} µs, ${body.routes.length} routes`);
+  if (body.state === "stopped") console.log(`✓ ${zone} ${version} installed, ${body.routes.length} routes: ${zone} is stopped, and serves it once resumed (next-zones resume ${zone})`);
+  else console.log(`✓ ${zone} ${version} installed: switch ${(body.t.activate * 1000).toFixed(1)} µs, ${body.routes.length} routes`);
+}
+
+/* Every zone of a running Zones and its state (<base>/zones). */
+async function listZones() {
+  const url = flag("url", "http://127.0.0.1:3000"), base = flag("base", "/_next-zones"), asJson = takeSwitch("json");
+  const token = process.env.NEXT_ZONES_ADMIN_TOKEN;
+  const res = await fetch(`${url}${base}/zones`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { console.error(`✗ ${body.refused ?? body.failed ?? body.error ?? res.status}`); process.exit(1); }
+  if (asJson) { console.log(JSON.stringify(body.zones, null, 2)); return; }
+  const rows = Object.entries(body.zones).map(([name, z]) => [name, z.state, z.version ?? z.versions?.join(", ") ?? "", z.mount ?? "",
+    z.state === "failed" ? z.error : [z.previous ? `previous ${z.previous}` : "", z.since ? `since ${z.since}` : ""].filter(Boolean).join(", ")]);
+  if (!rows.length) { console.log("no zones"); return; }
+  const width = (i) => Math.max(...rows.map((r) => String(r[i]).length));
+  for (const r of rows) console.log(`${r[1] === "serving" ? "✓" : r[1] === "failed" ? "✗" : "·"} ${r.slice(0, 4).map((c, i) => String(c).padEnd(width(i))).join("  ")}  ${r[4]}`.trimEnd());
+}
+
+/* Stops or resumes a zone on a running Zones (<base>/zones/<zone>/stop, /resume). */
+async function stopOrResume(action) {
+  const url = flag("url", "http://127.0.0.1:3000"), base = flag("base", "/_next-zones");
+  const [zone] = rest;
+  if (!zone) usage(`${action} <zone> [--url http://127.0.0.1:3000] [--base /_next-zones]`);
+  const body = await ping(url, base, `/zones/${encodeURIComponent(zone)}/${action}`);
+  if (!body.changed) console.log(`✓ ${zone} ${body.version} was ${body.state} already`);
+  else console.log(`✓ ${zone} ${body.version} ${action === "stop" ? "stopped: its URLs answer 404" : "serves again"} (switch ${(body.ms * 1000).toFixed(1)} µs)`);
 }
 
 async function check(dirs) {

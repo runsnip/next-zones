@@ -158,7 +158,7 @@ function createStaging(ctx) {
     const key = buildKey(identity, buildId);
     const cacheDir = path.join(ctx.cacheDir, name, `${key}--${shellBuildId}--${SEED_FORMAT}`);
     return {
-      name, mount, aliases, rules, publicDir, version: identity.version,
+      name, mount, aliases, rules, publicDir, version: identity.version, livePull: identity.livePull === true,
       instrumentationFile: info.instrumentation ? path.join(serverDir, "instrumentation.js") : null,
       dist, appPaths, routes, dynamicRoutes, actions: info.actions, prerender: info.prerender, cacheDir,
       pagePaths, pageRoutes, pageSystem, dataRoutes: info.dataRoutes ?? [], buildId,

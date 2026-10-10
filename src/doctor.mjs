@@ -410,7 +410,9 @@ export async function doctor({ dirs, store, url, fast = false, print = console.l
           if (built[pkg] && current && built[pkg] !== current) error("store", `${name} ${version} was built with ${pkg} ${built[pkg]}, the shell has ${current}`, `rebuild ${name}: Zones refuses it`);
         }
       }
-      if (state) ok("store", `state.json: ${Object.entries(state.zones ?? {}).map(([n, v]) => `${n} ${v}`).join(", ") || "no pins"}`);
+      if (state) ok("store", `state.json: ${Object.entries(state.zones ?? {}).map(([n, v]) => `${n} ${v}${(state.stopped ?? []).includes(n) ? " (stopped)" : ""}`).join(", ") || "no pins"}`);
+      /* A zone left stopped is a choice, but one that outlives a restart: said, so it is not forgotten. */
+      for (const name of state?.stopped ?? []) warn("store", `${name} is stopped: its URLs answer 404, after a restart too`, `next-zones resume ${name} --url <zones url>, when it should serve again`);
     }
     /* Every image pinned, by state.json or by the workspace's zones.json: whole, as built (Zones checks the same before
        it installs one, and refuses it otherwise). */

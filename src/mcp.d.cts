@@ -31,6 +31,12 @@ export interface ZonesApi {
   install?(zone: string, version: string): Promise<object>;
   /** "prune": removes zone images no longer needed. */
   prune?(options?: { keep?: number; dryRun?: boolean }): Promise<object>;
+  /** "read": every zone and its state (serving, stopped, failed, available). */
+  zones?(): Record<string, object>;
+  /** "stop": stops a zone (its URLs answer 404; it stays installed). */
+  stop?(zone: string): Promise<object>;
+  /** "stop": resumes a stopped zone. */
+  resume?(zone: string): Promise<object>;
 }
 
 export interface ToolContext {
@@ -55,7 +61,7 @@ export interface ToolOptions<Args = Record<string, unknown>> {
   /** OAuth scopes a caller needs for it. */
   scopes?: string[];
   /** What its handler may do with Zones; none by default. */
-  zones?: Array<"read" | "pull" | "install" | "prune">;
+  zones?: Array<"read" | "pull" | "install" | "prune" | "stop">;
   /** A call that runs longer fails, and its signal aborts (default 30 000). */
   timeoutMs?: number;
   handler(args: Args, context: ToolContext): ToolResult | Promise<ToolResult>;
@@ -121,8 +127,8 @@ export function Mcp(options: McpOptions): McpServer;
 export function Tools(...tools: Array<McpTool | McpTool[]>): McpTool[];
 /** A tool of your own. It runs in Zones' process: run code you do not trust elsewhere, behind a tool that calls it. */
 export function Tool<Args = Record<string, unknown>>(options: ToolOptions<Args>): McpTool;
-/** zones_status, zones_images, zones_pull and zones_install. */
-export function LivePull(options?: { tools?: Array<"status" | "images" | "pull" | "install">; scopes?: string[] }): McpTool[];
+/** zones_status, zones_images, zones_pull, zones_install, zones_stop and zones_resume. */
+export function LivePull(options?: { tools?: Array<"status" | "images" | "pull" | "install" | "stop" | "resume">; scopes?: string[] }): McpTool[];
 /** zones_metrics (needs the shell's metrics: true). */
 export function Metrics(options?: { scopes?: string[] }): McpTool[];
 /** Skills as resources (skill://<name>/<file>) and prompts: folders holding a SKILL.md (paths from the shell's folder, or file: URLs), or Skill(…). */

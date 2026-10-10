@@ -3,6 +3,11 @@
  * Installing a zone image: stage it, analyse its main chunk and seed its cache (in parallel with other installs),
  * then, one at a time, register its instrumentation, prepare and switch, and tell open tabs. The store's state.json
  * keeps the active versions across restarts.
+ *
+ * Stopping a zone takes it out of serving and keeps it installed: the same switch with an empty build in its place
+ * (activate.cjs), so its URLs answer 404 (server.cjs) while its build stays loaded; resuming switches that build back
+ * in, with no install. A version installed while the zone is stopped replaces the stopped one and stays stopped. The
+ * stopped zones are kept in state.json too.
  */
 const fs = require("node:fs");
 const path = require("node:path");
@@ -27,11 +32,13 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
     return run;
   }
 
-  /* Open tabs listening for swaps (<base>/events, read by <ZoneUpdates />); told after every switch. */
-  function announceSwap(staged) {
-    const message = `event: swap\ndata: ${JSON.stringify({ zone: staged.name, version: staged.version })}\n\n`;
+  /* Open tabs listening for swaps (<base>/events, read by <ZoneUpdates />); told after every switch, a stop and a
+     resume included, so a tab's next navigation sees what serves now. */
+  function announceSwap(staged, state = "serving") {
+    const message = `event: swap\ndata: ${JSON.stringify({ zone: staged.name, version: staged.version, state })}\n\n`;
     for (const res of ctx.listeners) res.write(message);
   }
+  const zeroTimings = () => ({ stage: 0, prepare: 0, overlay: 0, reloadMatchers: 0, fsCheck: 0, lru: 0, activate: 0 });
 
   /** Installs the zone build in `dist`; resolves with the timings, once it serves. Measured (metrics.cjs). */
   function install(name, dist) {
@@ -39,8 +46,9 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
       .then((r) => { blocked.observe(r.blockedMs / 1000, { zone: name }); return r; });
   }
   async function installOnce(name, dist) {
-    const t = { stage: 0, prepare: 0, overlay: 0, reloadMatchers: 0, fsCheck: 0, lru: 0, activate: 0 };
+    const t = zeroTimings();
     let s0 = now();
+    let stopped = false;
     const loop = monitorEventLoopDelay({ resolution: 1 });
     loop.enable();
     const staged = await staging.stage(name, dist);
@@ -54,21 +62,75 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
       s0 = now();
       await instrumentation.registerZoneInstrumentation(staged);
       t.instrumentation = now() - s0;
-      const plan = await activation.prepare(staged);
-      t.prepare = now() - s0; s0 = now();
-      await activation.activate(staged, t, plan);
-      t.activate = now() - s0;
+      /* A stopped zone: the new version takes the stopped one's place, and serves once the zone is resumed. */
+      stopped = ctx.stopped.has(name);
+      if (stopped) { ctx.stopped.set(name, staged); ctx.stoppedRevision++; }
+      else {
+        const plan = await activation.prepare(staged);
+        t.prepare = now() - s0; s0 = now();
+        await activation.activate(staged, t, plan);
+        t.activate = now() - s0;
+        ctx.zoneSince.set(name, new Date().toISOString());
+      }
       collector.record(staged);
       /* What the browser may now hold, for the next install's conflict check. */
       for (const [id, hashes] of Object.entries(staged.zoneModules ?? {})) {
         const held = ctx.clientKnown.get(id) ?? ctx.clientKnown.set(id, new Set()).get(id);
         for (const h of hashes) held.add(h);
       }
-      announceSwap(staged);
+      if (!stopped) announceSwap(staged);
     });
     loop.disable();
     /* How long the install kept the event loop from serving requests, at most. */
-    return { name, version: staged.version, routes: staged.routes, ms: +(t.stage + t.activate).toFixed(3), blockedMs: +(loop.max / 1e6).toFixed(1), t, ...(staged.warnings?.length ? { warnings: staged.warnings } : {}) };
+    return {
+      name, version: staged.version, state: stopped ? "stopped" : "serving", routes: staged.routes, ms: +(t.stage + t.activate).toFixed(3),
+      blockedMs: +(loop.max / 1e6).toFixed(1), t, ...(staged.warnings?.length ? { warnings: staged.warnings } : {}),
+    };
+  }
+
+  /** Stops a zone: its URLs answer 404 until it is resumed; it stays installed. Resolves { name, version, state, changed, ms }. */
+  async function stop(name, { save = true } = {}) {
+    checkZone(name);
+    const result = await exclusive(async () => {
+      const already = ctx.stopped.get(name);
+      if (already) return { name, version: already.version, state: "stopped", changed: false };
+      const staged = ctx.zones.get(name);
+      if (!staged) throw new ZoneError(`zone "${name}" is not installed`);
+      const removal = activation.removal(name);
+      const plan = await activation.prepare(removal);
+      const t = zeroTimings(), s0 = now();
+      await activation.activate(removal, t, plan);
+      const ms = now() - s0;
+      ctx.stopped.set(name, staged);
+      ctx.stoppedRevision++;
+      ctx.zoneSince.set(name, new Date().toISOString());
+      announceSwap(staged, "stopped");
+      return { name, version: staged.version, state: "stopped", changed: true, ms: +ms.toFixed(3) };
+    });
+    if (result.changed && save) await saveState();
+    return result;
+  }
+
+  /** Resumes a stopped zone: the build it had serves again, with no install. Resolves { name, version, state, changed, ms }. */
+  async function resume(name, { save = true } = {}) {
+    checkZone(name);
+    const result = await exclusive(async () => {
+      const serving = ctx.zones.get(name);
+      if (serving) return { name, version: serving.version, state: "serving", changed: false };
+      const staged = ctx.stopped.get(name);
+      if (!staged) throw new ZoneError(`zone "${name}" is not installed`);
+      const plan = await activation.prepare(staged);
+      const t = zeroTimings(), s0 = now();
+      await activation.activate(staged, t, plan);
+      const ms = now() - s0;
+      ctx.stopped.delete(name);
+      ctx.stoppedRevision++;
+      ctx.zoneSince.set(name, new Date().toISOString());
+      announceSwap(staged);
+      return { name, version: staged.version, state: "serving", changed: true, ms: +ms.toFixed(3) };
+    });
+    if (result.changed && save) await saveState();
+    return result;
   }
 
   /* ── the store's state: which version of each zone is active ──────────────────────────────────────────────────
@@ -77,6 +139,8 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
    * one store never leave it half-written (each write is a rename); the last write wins. Keeping several Zones
    * processes on the same versions is another matter: each installs on its own admin request. */
   const stateFile = path.join(ctx.store, "state.json");
+  /* The installed version of each zone, serving or stopped. */
+  const installedVersions = () => Object.fromEntries([...ctx.zones.values(), ...ctx.stopped.values()].map((z) => [z.name, z.version]));
   const persist = ctx.options.persist !== false;
   /* The installs of each zone, most recent last ({ version, at }), kept across restarts: prune's rollback window. */
   const HISTORY = 20;
@@ -98,10 +162,10 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
   function saveState() {
     if (!persist) return stateWrites;
     stateWrites = stateWrites.then(async () => {
-      const active = Object.fromEntries([...ctx.zones.values()].map((z) => [z.name, z.version]));
+      const active = installedVersions();
       const temp = `${stateFile}.${process.pid}.tmp`;
       await fs.promises.mkdir(ctx.store, { recursive: true });
-      await fs.promises.writeFile(temp, JSON.stringify({ zones: active, history: installHistory, updatedAt: new Date().toISOString() }, null, 2) + "\n");
+      await fs.promises.writeFile(temp, JSON.stringify({ zones: active, stopped: [...ctx.stopped.keys()], history: installHistory, updatedAt: new Date().toISOString() }, null, 2) + "\n");
       await fs.promises.rename(temp, stateFile);
     }).catch((error) => console.error("next-zones: could not write the store's state", error));
     return stateWrites;
@@ -164,7 +228,7 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
   function prune({ keep = pruneOptions?.keep ?? 2, dryRun = false } = {}) {
     const run = pruning.then(() => pruneStore({
       store: ctx.store, cacheDir: ctx.cacheDir, keep, dryRun, pins: ctx.options.pins ?? {}, busy: ctx.installing, history: installHistory,
-      active: Object.fromEntries([...ctx.zones.values()].map((z) => [z.name, z.version])),
+      active: installedVersions(),
       release: async (key) => (ctx.staged?.has(key) ? (await collector.collect({ only: key })).pinned.length === 0 : true),
       holds: (key) => collector.holds(key),
     }));
@@ -181,6 +245,9 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
     } catch (error) { console.error("next-zones: prune failed", error); }
   }
 
+  function checkZone(name) {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name ?? "")) throw new ZoneError(`a zone name is required, got ${JSON.stringify(name)}`);
+  }
   function checkName(name, version) {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(name ?? "") || !/^[A-Za-z0-9._-]+$/.test(version ?? "")) {
       throw new ZoneError(`a zone name and version are required, got ${JSON.stringify({ name, version })}`);
@@ -209,7 +276,8 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
     const state = persist && fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : {};
     /* Pins written after the state (a new build, a new deploy) replace it; otherwise a restart keeps what was live. */
     const pinsAt = ctx.options.pinsAt ?? 0;
-    const saved = pinsAt > (Date.parse(state.updatedAt ?? "") || 0) ? {} : state.zones ?? {};
+    const fresh = pinsAt > (Date.parse(state.updatedAt ?? "") || 0);
+    const saved = fresh ? {} : state.zones ?? {};
     for (const [name, version] of Object.entries({ ...(ctx.options.pins ?? {}), ...saved })) {
       try {
         await installVersion(name, String(version), { save: false });
@@ -219,11 +287,36 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
         console.error(`next-zones: ${name} ${version} was not installed at boot: ${error.message}`);
       }
     }
+    /* The zones stopped when the state was written stay stopped (before Zones listens: no request sees them serve). */
+    for (const name of fresh ? [] : state.stopped ?? []) {
+      if (ctx.zones.has(name)) await stop(name, { save: false });
+    }
     /* What a crashed pull left, and what the last run would have pruned. */
     await autoPrune();
   }
 
-  return { install, installVersion, pullVersion, prune, restore, admitImage, incoming, boot: () => ({ ...bootReport }) };
+  /** Every zone and its state: "serving", "stopped", "failed" (at boot), or "available" (only images in the store). */
+  function describe() {
+    const zones = {};
+    const previousOf = (name, version) => [...(installHistory[name] ?? [])].reverse().find((h) => h.version !== String(version))?.version ?? null;
+    const installed = (z, state) => ({
+      state, version: String(z.version), mount: z.mount, aliases: (z.aliases ?? []).map((a) => a.source), livePull: z.livePull === true,
+      since: ctx.zoneSince.get(z.name) ?? null, previous: previousOf(z.name, z.version),
+    });
+    for (const z of ctx.zones.values()) zones[z.name] = installed(z, "serving");
+    for (const z of ctx.stopped.values()) zones[z.name] = installed(z, "stopped");
+    for (const [name, r] of Object.entries(bootReport)) if (!r.ok && !zones[name]) zones[name] = { state: "failed", version: r.version, error: r.error };
+    let names = [];
+    try { names = fs.readdirSync(ctx.store).filter((n) => /^[a-z0-9][a-z0-9-]*$/.test(n) && !zones[n]); } catch {}
+    for (const name of names) {
+      let versions = [];
+      try { versions = fs.readdirSync(path.join(ctx.store, name)).filter((v) => !v.startsWith(".") && fs.existsSync(path.join(ctx.store, name, v, "zone.json"))); } catch {}
+      if (versions.length) zones[name] = { state: "available", versions: versions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })) };
+    }
+    return Object.fromEntries(Object.entries(zones).sort(([a], [b]) => a.localeCompare(b)));
+  }
+
+  return { install, installVersion, pullVersion, prune, restore, admitImage, incoming, stop, resume, describe, boot: () => ({ ...bootReport }) };
 }
 
 module.exports = { createInstaller };

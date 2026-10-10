@@ -31,7 +31,9 @@ function installZoneMetrics(ctx) {
   const registryShared = metrics.counter("nextzones_registry_shared_total", { help: "Times a build used a module another build had loaded" });
   const reclaims = metrics.counter("nextzones_reclaims_total", { help: "Last-resort collections run once idle after a version was collected" });
   const active = metrics.gauge("nextzones_zone_active", { help: "1 for the version of each zone that serves" });
-  let lastShared = 0, lastReclaims = 0, lastActive = new Map();
+  const stopped = metrics.gauge("nextzones_zone_stopped", { help: "1 for a zone that is stopped, 0 once it serves again" });
+  const stoppedRequests = metrics.counter("nextzones_stopped_requests_total", { help: "Requests answered 404 because their zone is stopped, by zone" });
+  let lastShared = 0, lastReclaims = 0, lastActive = new Map(), lastStopped = new Set();
   metrics.collect(() => {
     const m = process.memoryUsage();
     memory.rss.set(m.rss); memory.heapUsed.set(m.heapUsed); memory.heapTotal.set(m.heapTotal); memory.external.set(m.external);
@@ -52,13 +54,19 @@ function installZoneMetrics(ctx) {
     for (const [key, labels] of lastActive) if (!now.has(key)) active.set(0, labels);
     for (const labels of now.values()) active.set(1, labels);
     lastActive = now;
+    for (const name of lastStopped) if (!ctx.stopped.has(name)) stopped.set(0, { zone: name });
+    for (const name of ctx.stopped.keys()) stopped.set(1, { zone: name });
+    lastStopped = new Set(ctx.stopped.keys());
   });
 
   /** Measures one request, from now to the end of its response. `zoneOf(pathname)` names the zone that serves it. */
   function track(req, res, pathname) {
     const start = process.hrtime.bigint();
     res.once("finish", () => {
-      const zone = ctx.zoneOfRoute?.(pathname) ?? null;
+      /* A stopped zone's request counts under that zone (its 404), and as a stopped request. */
+      const off = ctx.stoppedZoneOf?.(pathname) ?? null;
+      if (off) stoppedRequests.inc({ zone: off.name });
+      const zone = off ?? ctx.zoneOfRoute?.(pathname) ?? null;
       const name = zone?.name ?? (pathname.startsWith("/_next/") ? "static" : "shell");
       const labels = { zone: name, version: zone ? String(zone.version) : "", code: `${Math.floor(res.statusCode / 100)}xx` };
       requests.inc(labels);

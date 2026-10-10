@@ -27,15 +27,16 @@ These are the facts an assistant most often gets wrong. Each is detailed in the 
   - An image's version is the `version` in the zone's `package.json` (`--version` overrides). Images are immutable: bump the version to rebuild.
 - **Running:** `next-zones start` (what `build` made), `next-zones serve --shell <dir> --store <dir>`, or from code `createZones({ shell, store })` from `@runsnip/next-zones/zones`, then `zones.listen(port)`. One Zones per process, created before anything requires Next.
 - **Releasing a zone while it serves:** `next-zones install blog 1.4.0 --url http://127.0.0.1:3000`, or `zones.install("blog", "1.4.0")`. The same command rolls back to an earlier version still in the store. `install`, `pull --url` and `prune --url` talk to Zones' admin URLs, so the shell must declare `endpoints: { admin: true }` (else 404).
+- **Stopping a zone while it serves:** `next-zones stop blog` (`zones.stop("blog")`, `POST <base>/zones/blog/stop`, MCP `zones_stop`): every URL of blog answers the shell's 404, with `x-next-zones-state: stopped` and `x-next-zones-zone: blog` on the response (and in its Server-Timing); the shell's not-found page tells it from a plain 404 with `useZoneState()` from `@runsnip/next-zones/client` (a client component: reading `headers()` in the root not-found would make every route of the shell dynamic); it stays installed, and `next-zones resume blog` serves it again with no install. A version installed while it is stopped stays stopped. `next-zones zones` (`zones.zones()`, `GET <base>/zones`, MCP `zones_status`) lists every zone and its state: `serving`, `stopped`, `failed`, `available`. `next-zones start` is not a zone command: it runs what `build` made.
 - **A zone image enters a store only by a pull from a source**, never by an upload: a folder, a URL template (`https://host/{zone}/{version}.tgz`, `.tgz` or `.zip`, resumed on a dropped connection) or service-connector. `next-zones pull` pulls on the server side. A ping to a running Zones (`next-zones pull … --url`, or installing a version the store lacks) pulls only a zone declaring `livePull: true`; for any other zone, run `next-zones pull <zone> <version> --store <dir> --source …` on the server (safe beside a running Zones), then `install --url`. Old images are pruned (`--keep 2` by default).
 - **Zones' own URLs** (`/_next-zones/…`) exist only when the shell declares them: `endpoints: { events, health, admin }`. `events` and `health` are public (health's details go to an admin only); `admin` URLs need `Authorization: Bearer <NEXT_ZONES_ADMIN_TOKEN>`, or a request from the same machine when no token is set.
 - **The Pages Router works** (every mode): a zone's pages live in `pages/<mount>/…`, its own `_app` and `_document` at the top of `pages/`. Each Pages Router page renders whole in its zone's build (its document, build id, chunks): soft navigation inside the zone keeps `_app` state; going to another zone, or between the App Router and the Pages Router, loads a new document (Next's rule). `getStaticProps`, `getStaticPaths` (with `fallback`, `revalidate`) and `getServerSideProps` work.
 - **A 404 under a zone's mount is the zone's own** (every mode): a URL there that nothing serves, or a page answering `notFound`, gets the zone's `app/not-found` (with an `app/` folder; Next never shows `pages/404` then) or its `pages/404`/`_error` (only `pages/`), as when the zone runs alone; a zone without one, and every URL outside the zones, get the shell's.
 - **Open tabs follow a new version** when the shell renders `<ZoneUpdates />` from `@runsnip/next-zones/client` and declares `endpoints: { events: true }`; a Pages Router zone renders it in its own `_app` too.
-- **MCP:** the shell's `zoneConfig({ mcp: Mcp({ tools: Tools(LivePull(), Metrics(), Tool({ name, description, input, handler })), skills: Skills(…), auth: [Bearer({ env }), OAuth({ issuer })] }) })` (from `@runsnip/next-zones/mcp`) makes Zones an MCP server at `/_next-zones/mcp`, whatever `endpoints` are declared (all off included). Zones' own tools (`zones_status`, `zones_images`, `zones_pull`, `zones_install`, `zones_metrics`) are optional; your `Tool(…)`s reach Zones only as far as their `zones: ["read" | "pull" | "install" | "prune"]` declares. A pull on request needs the zone's `livePull`. No `auth`: the admin rule. `OAuth(…)` needs `@runsnip/jwks` (an optional peer dependency) or another implementation of its contract as `Mcp({ jwks })`. Tools run in Zones' process: run untrusted code elsewhere. Zones only (not mode `"single"`).
+- **MCP:** the shell's `zoneConfig({ mcp: Mcp({ tools: Tools(LivePull(), Metrics(), Tool({ name, description, input, handler })), skills: Skills(…), auth: [Bearer({ env }), OAuth({ issuer })] }) })` (from `@runsnip/next-zones/mcp`) makes Zones an MCP server at `/_next-zones/mcp`, whatever `endpoints` are declared (all off included). Zones' own tools (`zones_status`, `zones_images`, `zones_pull`, `zones_install`, `zones_stop`, `zones_resume`, `zones_metrics`) are optional; your `Tool(…)`s reach Zones only as far as their `zones: ["read" | "pull" | "install" | "prune" | "stop"]` declares. A pull on request needs the zone's `livePull`. No `auth`: the admin rule. `OAuth(…)` needs `@runsnip/jwks` (an optional peer dependency) or another implementation of its contract as `Mcp({ jwks })`. Tools run in Zones' process: run untrusted code elsewhere. Zones only (not mode `"single"`).
 - **Metrics:** the shell's `metrics: true` opens one store for the process, read as Prometheus text at `/_next-zones/metrics` by an admin. `metrics: true` alone opens that URL: no `endpoints` declaration is needed. A zone's code measures with `counter`, `gauge`, `histogram` and `time` from `@runsnip/next-zones/metrics`; with metrics off they do nothing.
 - **Developing:** `next-zones dev <zones dir>` runs every zone in one `next dev`, with HMR and soft navigation. `next-zones doctor <dir>` checks a workspace and says what to fix.
-- **Entry points:** `@runsnip/next-zones/config` (`zoneConfig`, `readZone`), `/client` (`ZoneUpdates`), `/zones` (`createZones`), `/build`, `/sources` (`fromDirectory`, `fromHttp`, `fromConnector`, `packZoneImage`), `/metrics`, `/mcp` (`Mcp`, `Tools`, `Tool`, `LivePull`, `Metrics`, `Skills`, `Skill`, `NextZonesSkill`, `Bearer`, `OAuth`), `/tsconfig/zone.json`; the `next-zones` command.
+- **Entry points:** `@runsnip/next-zones/config` (`zoneConfig`, `readZone`), `/client` (`ZoneUpdates`, `useZoneState`), `/zones` (`createZones`), `/build`, `/sources` (`fromDirectory`, `fromHttp`, `fromConnector`, `packZoneImage`), `/metrics`, `/mcp` (`Mcp`, `Tools`, `Tool`, `LivePull`, `Metrics`, `Skills`, `Skill`, `NextZonesSkill`, `Bearer`, `OAuth`), `/tsconfig/zone.json`; the `next-zones` command.
 
 The documentation follows, page by page.
 
@@ -54,7 +55,7 @@ server without a restart.
 >   - the zone declaration (`zoneConfig`);
 >   - the CLI: `init`, `add`, `check`, `doctor`, `dev`, `build`, `start`, `serve`, `install`, `pack`, `pull`, `prune`,
 >     `watch`;
->   - Zones (`createZones`), which installs and swaps zones at run time;
+>   - Zones (`createZones`), which installs, swaps, stops and resumes zones at run time;
 >   - one combined build of every zone (`mode: "single"`, the composer);
 >   - `<ZoneUpdates />`;
 >   - metrics: Zones' own and any zone's, as Prometheus text (`@runsnip/next-zones/metrics`);
@@ -456,11 +457,14 @@ build scripts, Zones.
 | `next-zones pull <zone> <version> --url <zones url> [--base /_next-zones]` | Pings a running Zones to pull it from its sources: only a zone that allows [live pulls](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#live-pulls) |
 | `next-zones prune --store <dir> [--keep 2] [--pins zones.json] [--cache <dir>] [--dry-run]` | [Prunes](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#pruning) a store no Zones runs on (refused while one does) |
 | `next-zones prune --url <zones url> [--base /_next-zones] [--keep 2] [--dry-run]` | Asks a running Zones to prune its store |
-| `next-zones install <zone> <version> [--url http://127.0.0.1:3000] [--base /_next-zones]` | Asks a running Zones service to install, swap to or roll back to a version |
+| `next-zones install <zone> <version> [--url http://127.0.0.1:3000] [--base /_next-zones]` | Asks a running Zones service to install, swap to or roll back to a version (a stopped zone stays stopped) |
+| `next-zones zones [--url http://127.0.0.1:3000] [--base /_next-zones] [--json]` | Every zone of a running Zones and its state: serving, stopped, failed, available ([zones and their state](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#zones-and-their-state)) |
+| `next-zones stop <zone> [--url http://127.0.0.1:3000] [--base /_next-zones]` | [Stops](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#stopping-a-zone) a zone: its URLs answer 404, it stays installed |
+| `next-zones resume <zone> [--url http://127.0.0.1:3000] [--base /_next-zones]` | Resumes a stopped zone, with no install |
 | `next-zones dev <zones dir> [--port 3000]` | Develops every zone at once: one `next dev`, with HMR and soft navigation (below) |
 | `next-zones watch <zones dir> <zone> [more zones…] [--url http://127.0.0.1:3000] [--base /_next-zones] [--store <dir>]` | Rebuilds zones on every change and installs them on a running Zones service (below) |
 
-`start`, `serve`, `install`, `pull`, `prune` and `watch` read the admin token from `NEXT_ZONES_ADMIN_TOKEN`. When the
+`start`, `serve`, `install`, `zones`, `stop`, `resume`, `pull`, `prune` and `watch` read the admin token from `NEXT_ZONES_ADMIN_TOKEN`. When the
 server has a token, a command must send the same one, even from the same machine: the loopback rule holds only with
 no token configured.
 
@@ -616,6 +620,7 @@ with `1` on an error.
 | **Next's and React's checks** (not with `--fast`): `eslint-config-next`'s rules on each zone's sources, or the zone's own ESLint config; then `next typegen` and `tsc --noEmit` | Neither Next nor React ships a doctor. These are their official checks: Next's plugin, React's hooks and compiler rules, and the type check `next build` runs. They run from the workspace's installs (`eslint` 9, `eslint-config-next`, `typescript`); nothing is downloaded |
 | The shell's MCP server (`zoneConfig({ mcp })`): `Metrics()` with metrics on; its path under no route of the shell and no zone's mount; `@runsnip/jwks` installed for `OAuth(…)`, unless `Mcp({ jwks })` (errors); a `Bearer({ env })` whose variable is set, not mode `"single"` (warnings) | Zones refuses to start otherwise |
 | With `--store`: the versions `state.json` and `zones.json` pin are in the store, built with the shell's Next and React, and whole as built (their integrity, as Zones checks it) | Zones refuses them otherwise |
+| With `--store`: a zone `state.json` records as stopped (warning) | Its URLs answer 404, after a restart too |
 | With `--url`: a Zones answers at that URL (a warning when it does not) | |
 
 ## `next-zones dev`
@@ -1032,12 +1037,15 @@ machine (a loopback address).
 | Group | Endpoint | What it does |
 |---|---|---|
 | `events` | `GET <base>/events` | The swap events [`<ZoneUpdates />`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/updates.md) listens to: only zone names and versions. Public |
-| `health` | `GET <base>/health` | Public: 200 `{ ok, degraded }` once Zones serves, for a supervisor such as Docker's `HEALTHCHECK`. A zone that failed at boot makes it `degraded`, not unhealthy: a restart would not fix its build. An admin also gets the active versions, the boot failures, uptime and RSS |
-| `admin` (every endpoint of the group needs the admin token) | `GET <base>/images` | The zone images in the store, by zone: version, active or not, live pull, built with, integrity |
+| `health` | `GET <base>/health` | Public: 200 `{ ok, degraded }` once Zones serves, for a supervisor such as Docker's `HEALTHCHECK`. A zone that failed at boot makes it `degraded`, not unhealthy: a restart would not fix its build. An admin also gets every zone and its state ([below](#zones-and-their-state)), the boot failures, uptime and RSS |
+| `admin` (every endpoint of the group needs the admin token) | `GET <base>/zones` | Every zone and its state: `{ zones }` ([below](#zones-and-their-state)) |
+| | `POST <base>/zones/<zone>/stop` | [Stops](#stopping-a-zone) the zone: its URLs answer 404, it stays installed. 200 `{ name, version, state, changed, ms }` |
+| | `POST <base>/zones/<zone>/resume` | Resumes it: the version it has installed serves again, with no install. 200, as for stop |
+| | `GET <base>/images` | The zone images in the store, by zone: version, installed or not (`active`), live pull, built with, integrity |
 | | `GET <base>/images/<zone>/<version>` | One zone image |
 | | `POST <base>/images/<zone>/<version>/pull` | Asks Zones to pull it from its sources into the store, without installing it: 200 `{ pulledFrom }` (`null` when it was there); 409 with the reason when refused. A ping: only for a zone that allows [live pulls](#live-pulls) |
 | | `POST <base>/images/<zone>/<version>/install` | Installs, swaps to or rolls back to it, pulled first (as a ping) when the store lacks it: 200 with the timings; 409 with the reason when refused (nothing changes) |
-| | `DELETE <base>/images/<zone>/<version>` | Removes it from the store. Never the active version; one whose code other versions still share is refused until a restart |
+| | `DELETE <base>/images/<zone>/<version>` | Removes it from the store. Never the installed version (serving or stopped); one whose code other versions still share is refused until a restart |
 | | `POST <base>/prune?keep=2[&dry=1]` | [Prunes](#pruning) the store: `{ removed, held, kept, freedBytes }`. `dry=1` only says what it would do |
 | | `POST <base>/collect?keep=2` | Collects old versions' loaded code and disk caches (not their images), keeping the active one and `keep` before it per zone |
 | | `POST <base>/policy` | Replaces the instrumentation policy in the running Zones (not the file): the body is the JSON of [`zones.config.json`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/instrumentation.md#the-policy), `{ "instrumentation": { … } }`, and replaces the whole policy (what it leaves out is back to the default); 200 with the policy now in force |
@@ -1062,6 +1070,108 @@ Under load, with 32 clients and 18 swaps, no request got a wrong answer.
 
 A rollback is the same operation with the previous version. Installs can run at the same time: their heavy work
 runs in parallel, and their switches take turns.
+
+## Stopping a zone
+
+A zone can be taken out of serving while Zones runs, and brought back, with no install and no restart:
+
+```sh
+next-zones stop blog          # every URL of blog answers 404
+next-zones resume blog        # blog serves again, the version it has installed
+next-zones zones              # every zone and its state
+```
+
+From code, `zones.stop("blog")` and `zones.resume("blog")`; over HTTP, `POST <base>/zones/blog/stop` and `/resume`
+(admin); for an assistant, the MCP tools `zones_stop` and `zones_resume` ([Zones as an MCP server](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/mcp.md)).
+
+- **Every URL of the zone answers 404:** under its mount, its aliases, its route handlers and server actions, its
+  Pages Router pages and their `/_next/data`. The page is the shell's not-found (to an RSC request, its payload, so a
+  soft navigation shows it). The zone's code does not run, its own not-found page included.
+- **Where the 404 comes from** is on the response: `x-next-zones-state: stopped` and `x-next-zones-zone: blog` (for
+  logs, a proxy, `curl -I`), and the same in `Server-Timing`, which the browser hands to the page. The shell's
+  not-found page tells the two 404s apart with `useZoneState()`, and stays static:
+
+  ```tsx
+  // shell/app/not-found.tsx
+  "use client";
+  import { useZoneState } from "@runsnip/next-zones/client";
+
+  export default function NotFound() {
+    const zone = useZoneState();          // { zone: "blog", state: "stopped" }, or null
+    return zone ? <p>{zone.zone} is not available right now.</p> : <p>This page could not be found.</p>;
+  }
+  ```
+
+  It reads the response the page came with (a page load), or the one a soft navigation fetched, once the page has
+  hydrated. The two headers are also on the request the not-found page renders for, but reading them there
+  (`headers()`) makes every route of the shell dynamic: Next renders the root not-found inside every route, and a
+  build with it turned `/`, `/login` and an ISR page of the test shell from static (`○`) to dynamic (`ƒ`). Only Zones
+  sets these headers: a client's own `x-next-zones-*` are removed.
+- **One switch,** the install's, with nothing in the zone's place: its routes, rules, aliases and segments go out in
+  one synchronous step, about 4 µs; resuming switches the same build back in, about 5 µs
+  ([measured](#stop-and-resume-measured)). Open tabs with [`<ZoneUpdates />`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/updates.md) are told: their next navigation
+  into the zone shows the 404.
+- **It stays installed:** its build stays loaded, its image is never pruned, and its static files are still served,
+  for a tab that loaded the zone before it stopped.
+- **The shell's proxy** runs, for `/_not-found`: a rule matching the zone's path does not see the request. A URL the
+  proxy (or a rewrite) sends into a stopped zone answers the same 404, marked.
+- **A version installed while the zone is stopped** replaces the stopped one and stays stopped (the install's result
+  says `state: "stopped"`); resuming serves it. A rollback works the same way.
+- **Across restarts:** `state.json` records the stopped zones, and a restart keeps them stopped, unless newer pins
+  replace the state ([pins and the store's state](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/cli.md)).
+- **Measured:** `nextzones_zone_stopped{zone}` is 1 while a zone is stopped; `nextzones_stopped_requests_total{zone}`
+  counts the requests answered 404 for it ([metrics](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/metrics.md)).
+
+### Zones and their state
+
+`zones.zones()`, `GET <base>/zones`, the admin part of `<base>/health`, `next-zones zones --json` and the MCP tool
+`zones_status` tell every zone the same way:
+
+```json
+{
+  "blog": { "state": "serving", "version": "1.4.0", "mount": "/blog", "aliases": ["/post/:id"], "livePull": true,
+            "since": "2026-10-10T10:12:03.000Z", "previous": "1.3.2" },
+  "shop": { "state": "stopped", "version": "4", "mount": "/shop", "aliases": [], "livePull": false,
+            "since": "2026-10-10T11:02:40.000Z", "previous": null },
+  "docs": { "state": "failed", "version": "2", "error": "zone \"docs\" 2 was not built for Zones (…)" },
+  "wiki": { "state": "available", "versions": ["1", "2"] }
+}
+```
+
+| `state` | |
+|---|---|
+| `serving` | Its URLs are served. `since`: when it last started serving; `previous`: the version installed before, a rollback's target |
+| `stopped` | Its URLs answer 404; it stays installed. `since`: when it stopped |
+| `failed` | It failed to install at boot, with the reason; Zones serves the rest |
+| `available` | Images in the store, never installed in this process |
+
+### Stop and resume, measured
+
+Node 24.16, Apple M1, measured 2026-10-10 with `node tools/bench/stop.mjs` against the test workspace's Zones (the
+shell, blog, shop and wiki serving; blog stopped and resumed 200 times after 20), on a machine busy with other work
+(load average 65 to 100). The reference is an install's switch, measured the same way at the same time (40 installs
+alternating two versions already loaded):
+
+| The switch | p50 | p99 |
+|---|---|---|
+| Stop | 4 µs | 10 µs |
+| Resume | 5 µs | 91 µs |
+| An install (the reference) | 9.7 µs | 16.9 µs |
+
+**What a stopped zone costs every other request.** While a zone is stopped, Zones asks each request's path whether a
+stopped zone owns it (`node tools/bench/stopped-lookup.mjs`, median of 15 batches of 100 000 calls, three aliases per
+stopped zone):
+
+| Stopped zones | Per request |
+|---|---|
+| 0 | about 5 ns (nothing is asked) |
+| 1 | 35 to 45 ns |
+| 10 | 45 to 80 ns |
+
+The path's first segment is walked in a trie by character code, so a path no stopped zone owns usually stops at its
+first character. Matching every alias's pattern instead, the first version, cost 367 ns with one zone stopped and
+2.7 µs with ten. What remains is a map lookup per character of the first segment and the alias patterns of a segment
+that does match.
 
 ## What a user notices
 
@@ -1259,7 +1369,9 @@ any tool that reads that format at it. Nothing is pushed anywhere.
 | `nextzones_install_blocked_seconds` | histogram | `zone` | The longest the event loop was held during an install |
 | `nextzones_pull_seconds` | histogram | `zone`, `via`, `outcome` | Pulls of a zone image from a source |
 | `nextzones_pruned_images_total`, `nextzones_pruned_bytes_total` | counter | | What pruning removed |
-| `nextzones_zone_active` | gauge | `zone`, `version` | 1 for the version that serves; 0 once a swap replaced it |
+| `nextzones_zone_active` | gauge | `zone`, `version` | 1 for the version that serves; 0 once a swap replaced it, or the zone stopped |
+| `nextzones_zone_stopped` | gauge | `zone` | 1 while the zone is [stopped](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#stopping-a-zone); 0 once it serves again |
+| `nextzones_stopped_requests_total` | counter | `zone` | Requests answered 404 because their zone is stopped (also counted in `nextzones_requests_total`, under the zone, `4xx`) |
 | `nextzones_registry_modules` | gauge | | Server modules shared across builds |
 | `nextzones_registry_shared_total` | counter | | Times a build used a module another build had loaded |
 | `nextzones_reclaims_total` | counter | | Last-resort collections after a version was collected |
@@ -1419,8 +1531,8 @@ Zones' own code is about 5% of the busy time in a CPU profile (`spikes/zones/RES
 # Zones as an MCP server
 
 Zones can serve the [Model Context Protocol](https://modelcontextprotocol.io), so an assistant (Claude, an IDE, an
-agent) works with the running Zones: reads what serves, installs and rolls back zone versions, reads the metrics, and
-calls tools of your own. The shell declares it in its `zoneConfig`:
+agent) works with the running Zones: reads what serves, installs and rolls back zone versions, stops and resumes zones,
+reads the metrics, and calls tools of your own. The shell declares it in its `zoneConfig`:
 
 ```js
 // shell/next.config.mjs
@@ -1456,16 +1568,18 @@ yours.
 
 | | Tools | What they do |
 |---|---|---|
-| `LivePull()` | `zones_status` | Each zone's active version, the zones that failed at boot, uptime and memory |
+| `LivePull()` | `zones_status` | Every zone and its state (serving, stopped, failed at boot, available), its version, mount, aliases, since when and the version before; uptime and memory ([zones and their state](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#zones-and-their-state)) |
 | | `zones_images` | The zone images in the store, by zone (one zone with `zone`) |
 | | `zones_pull` | Pulls `{ zone, version }` into the store from Zones' sources, without installing it |
 | | `zones_install` | Installs, swaps to or rolls back to `{ zone, version }`, with no restart; a version the store lacks is pulled first |
+| | `zones_stop` | [Stops](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#stopping-a-zone) `{ zone }`: its URLs answer 404, marked `x-next-zones-state: stopped`; it stays installed |
+| | `zones_resume` | Resumes `{ zone }`: the version it has installed serves again, with no install |
 | `Metrics()` | `zones_metrics` | The [metrics](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/metrics.md) as Prometheus text, filtered by `match` (a name prefix, or `/regex/`); needs the shell's `metrics: true` |
 
 A pull on request (`zones_pull`, and `zones_install` of a version the store lacks) needs the zone's `livePull: true`,
 as for the admin URLs ([live pulls](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#live-pulls)); a version already in the store installs either way.
 `LivePull({ tools: ["status", "images"] })` keeps only some of them; `LivePull({ scopes: ["zones:release"] })` makes
-pulling and installing need that OAuth scope.
+every tool but `zones_status` and `zones_images` (pulling, installing, stopping, resuming) need that OAuth scope.
 
 ### Your own
 
@@ -1494,8 +1608,9 @@ export const searchOrders = Tool({
   (`{ content, structuredContent }`). A thrown error is the call's error (`isError`), which the assistant reads.
 - **`context`**: `auth`, the caller ([below](#authorization)); `signal`, aborted when the client leaves or the call
   passes `timeoutMs` (30 s by default); `zones`, what the tool may do with Zones.
-- **`zones`**: a tool reaches Zones only as far as it declares. `"read"` gives `status()`, `images()` and
-  `metrics(match)`; `"pull"`, `"install"` and `"prune"` give those. None by default.
+- **`zones`**: a tool reaches Zones only as far as it declares. `"read"` gives `status()`, `zones()`, `images()` and
+  `metrics(match)`; `"pull"`, `"install"` and `"prune"` give those; `"stop"` gives `stop(zone)` and `resume(zone)`.
+  None by default.
 - **Results** over 8 MiB are refused.
 
 A tool is any `Tool(…)`: write your own factories (`Orders()`, `Billing()`) returning one or a list, and pass them to
@@ -1704,6 +1819,8 @@ Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router and Pages Router. Key:
 | service-connector as the source (`fromConnector`) | ✅ against its documented API |
 | A pull that would fill the disk | ✅ refused before it starts, or stopped while it runs ([the disk](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#the-disk)) |
 | Pruning old images, automatically or on request | ✅ ([pruning](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#pruning)) |
+| Stopping a zone while Zones runs (its URLs answer 404, marked), and resuming it with no install; kept across restarts | ✅ ([stopping a zone](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#stopping-a-zone)) |
+| Every zone and its state (serving, stopped, failed, available), from code, HTTP, the CLI and MCP | ✅ ([zones and their state](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#zones-and-their-state)) |
 
 ## MCP
 

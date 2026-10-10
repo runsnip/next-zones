@@ -3,6 +3,8 @@
  * The switch. prepare() builds, from the current state, everything that grows with the app (matchers, the overlay, the
  * router's lists, the segment map, the zones' routes, the rule tables); activate() only assigns what was prepared, in
  * one synchronous step, so no request sees half an install, and bumps the zone's segments (cached misses go lazily).
+ * Stopping a zone is the same switch with an empty build in its place (removal(name)): its routes, rules, segments and
+ * pages go out, and the zone leaves the installed set; resuming it is an install of the build it had.
  */
 
 const { compareRoutes, mergeSorted } = require("./route-order.cjs");
@@ -34,6 +36,11 @@ function createActivation(ctx, { rules }) {
   const { escapeStringRegexp } = ctx.requireNext("next/dist/shared/lib/escape-regexp");
   /* Every route of a zone: its app routes and its Pages Router pages. */
   const allRoutes = (z) => z.routes.concat(z.pageRoutes ?? []);
+  /** What stopping a zone switches in: a build with nothing in it, which takes the zone out of the installed set. */
+  const removal = (name) => ({
+    name, removed: true, routes: [], pageRoutes: [], appPaths: {}, pagePaths: {}, pageSystem: {}, dynamicRoutes: [], dataRoutes: [],
+    routerDynamic: [], routerData: [],
+  });
 
   /** Everything activation needs, built from the current state: O(app), off the switch. `marks` (the benchmark's)
       gets the time of each part, in ms. */
@@ -43,7 +50,7 @@ function createActivation(ctx, { rules }) {
     const server = ctx.servers.values().next().value;
     /* Next 16.4 on has no route matchers: it matches from appPathsManifest and appPathRoutes, assigned below. */
     const matched = Boolean(server.matchers);
-    const zoneMatchers = matched ? (await Promise.all([
+    const zoneMatchers = matched && !staged.removed ? (await Promise.all([
       ...zoneProviders(server).map((p) => p.transform(staged.appPaths)),
       ...(Object.keys(staged.pagePaths ?? {}).length ? zoneProviders(server, PAGES_PROVIDERS).map((p) => p.transform(staged.pagePaths)) : []),
     ])).flat() : [];
@@ -120,9 +127,15 @@ function createActivation(ctx, { rules }) {
     Object.assign(pagesManifest, staged.pagePaths);
     const systemPages = [];
     for (const [page, file] of Object.entries(staged.pageSystem ?? {})) if (!pagesManifest[page]) { pagesManifest[page] = file; systemPages.push(page); }
-    mark("manifest");
     /* The zones' routes for the router's appFiles and pageFiles after the switch, and the pages with a data route. */
     const others = [...ctx.zones.values()].filter((z) => z.name !== staged.name);
+    /* The old version's stand-ins gone (a zone stopped, or a new version without a Pages Router), another zone's take
+       their place: they are recorded as that zone's, which removes them in turn. */
+    const adopted = [];
+    for (const z of others) {
+      for (const [page, file] of Object.entries(z.pageSystem ?? {})) if (!pagesManifest[page]) { pagesManifest[page] = file; adopted.push([z.name, page]); }
+    }
+    mark("manifest");
     const nextZoneAppFiles = new Set(others.flatMap((z) => z.routes).concat(staged.routes));
     const nextZonePageFiles = new Set(others.flatMap((z) => z.pageRoutes ?? []).concat(staged.pageRoutes ?? []));
     const nextZoneDataRoutes = new Set(others.flatMap((z) => (z.dataRoutes ?? []).map((r) => r.page)).concat((staged.dataRoutes ?? []).map((r) => r.page)));
@@ -133,13 +146,13 @@ function createActivation(ctx, { rules }) {
     for (const route of allRoutes(staged)) nextSegmentZone.set(route.split("/")[1], staged);
     mark("segments");
     /* The zones' routing rules after the switch (aliases included): compiled here, assigned by the switch. */
-    const tables = rules.buildRuleTables([...ctx.zones.values()].filter((z) => z.name !== staged.name).concat(staged));
+    const tables = rules.buildRuleTables(staged.removed ? others : others.concat(staged));
     mark("rules");
     const segments = new Set(allRoutes(staged).concat(old?.routes ?? []).map((r) => r.split("/")[1] ?? ""));
     return {
       revision: ctx.revision, staged, old, staticMatchers, checkerDynamic, tables, manifest, segmentZone: nextSegmentZone, zoneAppFiles: nextZoneAppFiles, dynamicMatchers, appPathRoutes, segments,
       zoneMatchers: new Set(zoneMatchers), pages: Object.keys(staged.appPaths),
-      pagesManifest, systemPages, zonePageFiles: nextZonePageFiles, zoneDataRoutes: nextZoneDataRoutes, zoneBuildIds: nextZoneBuildIds,
+      pagesManifest, systemPages, adopted, zonePageFiles: nextZonePageFiles, zoneDataRoutes: nextZoneDataRoutes, zoneBuildIds: nextZoneBuildIds,
     };
   }
 
@@ -148,7 +161,8 @@ function createActivation(ctx, { rules }) {
     let s0 = now();
     /* What prepare built, assigned: nothing here grows with the app. */
     ctx.mergedManifest = plan.manifest;
-    ctx.zones.set(staged.name, staged);
+    if (staged.removed) ctx.zones.delete(staged.name);
+    else ctx.zones.set(staged.name, staged);
     ctx.zonesRevision++;
     Object.assign(ctx.ruleTables, plan.tables);
     ctx.segmentZone = plan.segmentZone;
@@ -173,15 +187,19 @@ function createActivation(ctx, { rules }) {
     t.fsCheck += now() - s0; s0 = now();
     for (const seg of plan.segments) ctx.segmentGeneration.set(seg, (ctx.segmentGeneration.get(seg) ?? 0) + 1);
     t.lru += now() - s0;
-    ctx.placed.set(staged.name, {
-      matchers: plan.zoneMatchers, pages: plan.pages, routes: allRoutes(staged),
-      dynamicPages: staged.dynamicRoutes.map((r) => r.page),
-      pagePages: Object.keys(staged.pagePaths ?? {}), systemPages: plan.systemPages, dataPages: staged.routerData.map((r) => r.page),
-    });
+    if (staged.removed) ctx.placed.delete(staged.name);
+    else {
+      ctx.placed.set(staged.name, {
+        matchers: plan.zoneMatchers, pages: plan.pages, routes: allRoutes(staged),
+        dynamicPages: staged.dynamicRoutes.map((r) => r.page),
+        pagePages: Object.keys(staged.pagePaths ?? {}), systemPages: plan.systemPages, dataPages: staged.routerData.map((r) => r.page),
+      });
+    }
+    for (const [name, page] of plan.adopted) ctx.placed.get(name)?.systemPages.push(page);
     ctx.revision++;
   }
 
-  return { prepare, activate };
+  return { prepare, activate, removal };
 }
 
 module.exports = { createActivation };

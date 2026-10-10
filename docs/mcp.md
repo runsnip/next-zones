@@ -1,8 +1,8 @@
 # Zones as an MCP server
 
 Zones can serve the [Model Context Protocol](https://modelcontextprotocol.io), so an assistant (Claude, an IDE, an
-agent) works with the running Zones: reads what serves, installs and rolls back zone versions, reads the metrics, and
-calls tools of your own. The shell declares it in its `zoneConfig`:
+agent) works with the running Zones: reads what serves, installs and rolls back zone versions, stops and resumes zones,
+reads the metrics, and calls tools of your own. The shell declares it in its `zoneConfig`:
 
 ```js
 // shell/next.config.mjs
@@ -38,16 +38,18 @@ yours.
 
 | | Tools | What they do |
 |---|---|---|
-| `LivePull()` | `zones_status` | Each zone's active version, the zones that failed at boot, uptime and memory |
+| `LivePull()` | `zones_status` | Every zone and its state (serving, stopped, failed at boot, available), its version, mount, aliases, since when and the version before; uptime and memory ([zones and their state](zones.md#zones-and-their-state)) |
 | | `zones_images` | The zone images in the store, by zone (one zone with `zone`) |
 | | `zones_pull` | Pulls `{ zone, version }` into the store from Zones' sources, without installing it |
 | | `zones_install` | Installs, swaps to or rolls back to `{ zone, version }`, with no restart; a version the store lacks is pulled first |
+| | `zones_stop` | [Stops](zones.md#stopping-a-zone) `{ zone }`: its URLs answer 404, marked `x-next-zones-state: stopped`; it stays installed |
+| | `zones_resume` | Resumes `{ zone }`: the version it has installed serves again, with no install |
 | `Metrics()` | `zones_metrics` | The [metrics](metrics.md) as Prometheus text, filtered by `match` (a name prefix, or `/regex/`); needs the shell's `metrics: true` |
 
 A pull on request (`zones_pull`, and `zones_install` of a version the store lacks) needs the zone's `livePull: true`,
 as for the admin URLs ([live pulls](zones.md#live-pulls)); a version already in the store installs either way.
 `LivePull({ tools: ["status", "images"] })` keeps only some of them; `LivePull({ scopes: ["zones:release"] })` makes
-pulling and installing need that OAuth scope.
+every tool but `zones_status` and `zones_images` (pulling, installing, stopping, resuming) need that OAuth scope.
 
 ### Your own
 
@@ -76,8 +78,9 @@ export const searchOrders = Tool({
   (`{ content, structuredContent }`). A thrown error is the call's error (`isError`), which the assistant reads.
 - **`context`**: `auth`, the caller ([below](#authorization)); `signal`, aborted when the client leaves or the call
   passes `timeoutMs` (30 s by default); `zones`, what the tool may do with Zones.
-- **`zones`**: a tool reaches Zones only as far as it declares. `"read"` gives `status()`, `images()` and
-  `metrics(match)`; `"pull"`, `"install"` and `"prune"` give those. None by default.
+- **`zones`**: a tool reaches Zones only as far as it declares. `"read"` gives `status()`, `zones()`, `images()` and
+  `metrics(match)`; `"pull"`, `"install"` and `"prune"` give those; `"stop"` gives `stop(zone)` and `resume(zone)`.
+  None by default.
 - **Results** over 8 MiB are refused.
 
 A tool is any `Tool(…)`: write your own factories (`Orders()`, `Billing()`) returning one or a list, and pass them to

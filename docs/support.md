@@ -87,6 +87,8 @@ Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router and Pages Router. Key:
 | service-connector as the source (`fromConnector`) | ✅ against its documented API |
 | A pull that would fill the disk | ✅ refused before it starts, or stopped while it runs ([the disk](zones.md#the-disk)) |
 | Pruning old images, automatically or on request | ✅ ([pruning](zones.md#pruning)) |
+| Stopping a zone while Zones runs (its URLs answer 404, marked), and resuming it with no install; kept across restarts | ✅ ([stopping a zone](zones.md#stopping-a-zone)) |
+| Every zone and its state (serving, stopped, failed, available), from code, HTTP, the CLI and MCP | ✅ ([zones and their state](zones.md#zones-and-their-state)) |
 
 ## MCP
 

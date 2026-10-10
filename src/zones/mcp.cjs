@@ -11,7 +11,8 @@
  * - Authorization: zones/mcp-auth.cjs. With OAuth, the protected resource metadata is served at
  *   /.well-known/oauth-protected-resource<path>.
  * - Tools: the owner's (Tool(…): its arguments checked against its input schema, then its handler run, with
- *   { zones, auth, signal }), and Zones' own: zones_status, zones_images, zones_pull and zones_install (LivePull()),
+ *   { zones, auth, signal }), and Zones' own: zones_status, zones_images, zones_pull, zones_install, zones_stop and
+ *   zones_resume (LivePull()),
  *   zones_metrics (Metrics()). A pull on request needs the zone's livePull, as for the admin URLs.
  * - Skills (Skills(…)): resources skill://<name>/<file>, and one prompt per skill, its SKILL.md.
  * The transport and the JSON-RPC are next-zones' own, and OAuth tokens are checked with @runsnip/jwks (no dependency
@@ -77,7 +78,7 @@ const VERSION = { type: "string", pattern: "^[A-Za-z0-9._-]+$", description: "Th
 const BUILTINS = {
   zones_status: {
     title: "Zones status", annotations: { readOnlyHint: true, openWorldHint: false },
-    description: "The zones Zones serves: each zone's active version and mount, the zones that failed at boot, uptime and memory.",
+    description: "Every zone and its state: serving, stopped (its URLs answer 404, it stays installed), failed at boot, or available (images in the store, never installed); each installed zone's version, mount, aliases, since when, and the version before it. Also uptime and memory.",
     input: { type: "object", properties: {}, additionalProperties: false },
     run: (z) => z.status(),
   },
@@ -98,6 +99,18 @@ const BUILTINS = {
     description: "Installs a version of a zone into the running Zones, with no restart: a new version, a swap, or a rollback to an earlier one. A version the store lacks is pulled first, which needs the zone's live pulls. Returns the install's timings.",
     input: { type: "object", properties: { zone: NAME, version: VERSION }, required: ["zone", "version"], additionalProperties: false },
     run: (z, { zone, version }) => z.install(zone, version),
+  },
+  zones_stop: {
+    title: "Stop a zone", annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+    description: "Stops a zone in the running Zones: every URL of it (its mount, its aliases) answers 404, marked with the response header x-next-zones-state: stopped. It stays installed; zones_resume brings it back at once. A version installed while it is stopped stays stopped.",
+    input: { type: "object", properties: { zone: NAME }, required: ["zone"], additionalProperties: false },
+    run: (z, { zone }) => z.stop(zone),
+  },
+  zones_resume: {
+    title: "Resume a zone", annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    description: "Resumes a stopped zone: the version it has installed serves again, with no install.",
+    input: { type: "object", properties: { zone: NAME }, required: ["zone"], additionalProperties: false },
+    run: (z, { zone }) => z.resume(zone),
   },
   zones_metrics: {
     title: "Zones metrics", annotations: { readOnlyHint: true, openWorldHint: false },
@@ -158,7 +171,7 @@ function loadSkills(declared, base) {
  * The MCP server.
  * @param {object} ctx
  * @param {object} declared   Mcp(…)
- * @param {object} zones      { status(), images(), pull(zone, version), install(zone, version), prune(options) }
+ * @param {object} zones      { status(), images(), zones(), pull(zone, version), install(zone, version), prune(options), stop(zone), resume(zone) }
  * @returns {{ path: string, handle(req, res, url): Promise<boolean> }}
  */
 function createMcp(ctx, declared, zones, { fetchImpl } = {}) {
@@ -173,6 +186,9 @@ function createMcp(ctx, declared, zones, { fetchImpl } = {}) {
     pull: (zone, version) => zones.pull(zone, version),
     install: (zone, version) => zones.install(zone, version),
     prune: (options) => zones.prune(options),
+    zones: () => zones.zones(),
+    stop: (zone) => zones.stop(zone),
+    resume: (zone) => zones.resume(zone),
     metrics(match) {
       const { render } = require("../metrics.cjs");
       const text = render();
@@ -193,10 +209,11 @@ function createMcp(ctx, declared, zones, { fetchImpl } = {}) {
       /* The owner's tool reaches Zones only as far as it declares (Tool({ zones })). */
       const allowed = new Set(t.zones ?? []);
       const scoped = {
-        ...(allowed.has("read") ? { status: api.status, images: api.images, metrics: api.metrics } : {}),
+        ...(allowed.has("read") ? { status: api.status, images: api.images, zones: api.zones, metrics: api.metrics } : {}),
         ...(allowed.has("pull") ? { pull: api.pull } : {}),
         ...(allowed.has("install") ? { install: api.install } : {}),
         ...(allowed.has("prune") ? { prune: api.prune } : {}),
+        ...(allowed.has("stop") ? { stop: api.stop, resume: api.resume } : {}),
       };
       tools.set(t.name, { ...t, run: (args, context) => t.handler(args, { ...context, zones: Object.freeze(scoped) }) });
     }

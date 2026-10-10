@@ -60,7 +60,8 @@ function createAssets(ctx) {
     try { decoded = decodeURIComponent(pathname); } catch { return null; }
     if (decoded.startsWith("/_next/static/")) {
       const rel = decoded.slice("/_next/static/".length);
-      for (const z of ctx.zones.values()) {
+      /* A stopped zone's too: a tab opened before it stopped may still ask for them. */
+      for (const z of [...ctx.zones.values(), ...ctx.stopped.values()]) {
         if (z.mainChunks?.[0] === decoded) return { file: z.mainChunkFile, contentType: "application/javascript", cacheControl: IMMUTABLE };
         /* A chunk written again with remapped module ids (stage.cjs). */
         for (const url of Object.values(z.chunkUrls ?? {})) {

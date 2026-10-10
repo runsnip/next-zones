@@ -19,7 +19,10 @@ function createContext(options) {
     /* Next is the shell's: every require of Next's internals resolves from the shell's directory. */
     requireNext: Module.createRequire(path.join(shell, "package.json")),
 
-    zones: new Map(),                 // name → staged zone (its build, routes, manifests, cache…)
+    zones: new Map(),                 // name → staged zone (its build, routes, manifests, cache…), serving
+    stopped: new Map(),               // name → staged zone, installed but stopped: its URLs answer 404 (install.cjs)
+    stoppedRevision: 0,               // bumped whenever the stopped set changes (server.cjs indexes it)
+    zoneSince: new Map(),             // name → when it last started serving, or stopped (ISO time)
     zonesRevision: 0,                 // bumped whenever the set of zones changes (memoised merged manifests)
     segmentZone: new Map(),           // first path segment ("blog") → the zone mounted there
     segmentGeneration: new Map(),     // first path segment → generation, bumped by a switch (cached misses)
@@ -45,6 +48,8 @@ function createContext(options) {
     hasPadding: false,
     generation: 0,
   };
+  /** A zone's installed build, serving or stopped. */
+  ctx.installedZone = (name) => ctx.zones.get(name) ?? ctx.stopped.get(name);
   /** The zone a route (or a request path) belongs to, by its first segment. */
   ctx.zoneOfRoute = (route) => ctx.segmentZone.get(/^\/([^/]*)/.exec(route ?? "")?.[1] ?? "");
   return ctx;

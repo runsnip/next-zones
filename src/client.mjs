@@ -9,11 +9,15 @@
  * another endpoints.base, pass endpoint="<base>/events". Where there is no event stream (a zone running alone, no
  * events declared), it does nothing.
  * Importing this module also gives the shell's browser runtime every feature a zone's code may use (runtime-features.mjs).
+ *
+ * useZoneState(): in the shell's not-found page, whether the 404 being shown is a stopped zone's ({ zone, state:
+ * "stopped" }) or not (null). Zones says so in the response's Server-Timing, which the browser exposes to the page, so
+ * the not-found page stays static (reading the request's headers there would make every route of the shell dynamic).
  */
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 /* With its extension: a Pages Router build leaves this package external, and Node's ESM loader finds next/ files only
    by their full name (Next has no exports map). */
-import { useRouter } from "next/navigation.js";
+import { useRouter, usePathname } from "next/navigation.js";
 
 /* The shell's Turbopack runtime with every feature a zone may use (runtime-features.mjs): an import that never runs. */
 if (globalThis.__NEXT_ZONES_NEVER__ === true) import("./runtime-features.mjs");
@@ -30,6 +34,33 @@ export function ZoneUpdates({ endpoint = "/_next-zones/events" }) {
     events.onerror = () => { if (events.readyState === EventSource.CLOSED) events.close(); };
     return () => { events.removeEventListener("swap", onSwap); events.close(); };
   }, [endpoint, router]);
+  return null;
+}
+
+/**
+ * Whether the page shown is a stopped zone's 404: { zone, state: "stopped" }, or null (a plain 404, or before the page
+ * has hydrated: it is read in the browser, from the response the page came with).
+ */
+export function useZoneState() {
+  const pathname = usePathname();
+  const [found, setFound] = useState(null);
+  useEffect(() => { setFound(zoneStateOf(window.location)); }, [pathname]);
+  return found;
+}
+
+/* The Server-Timing Zones sent with the response for this URL: the document's (a page load), or the latest RSC request
+   for its path (a soft navigation). */
+function zoneStateOf(location) {
+  if (typeof performance === "undefined" || typeof performance.getEntriesByType !== "function") return null;
+  const entries = [...performance.getEntriesByType("navigation"), ...performance.getEntriesByType("resource")];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    let url;
+    try { url = new URL(entries[i].name, location.href); } catch { continue; }
+    if (url.origin !== location.origin || url.pathname !== location.pathname) continue;
+    const timing = entries[i].serverTiming ?? [];
+    const state = timing.find((t) => t.name === "next-zones-state")?.description;
+    return state ? { zone: timing.find((t) => t.name === "next-zones-zone")?.description ?? null, state } : null;
+  }
   return null;
 }
 

@@ -195,7 +195,12 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
   };
   const renderPageComponent = NextNodeServer.prototype.renderPageComponent;
   NextNodeServer.prototype.renderPageComponent = function (renderCtx, bubbleNoFallback) {
-    const zone = renderCtx?.pathname === "/_not-found" || renderCtx?.pathname === "/404" ? zoneOfRequest(renderCtx.req) : null;
+    const notFound = renderCtx?.pathname === "/_not-found" || renderCtx?.pathname === "/404";
+    /* A URL of a stopped zone the shell's proxy rewrote to (Zones saw the URL before the rewrite): marked as Zones
+       marks the ones it sees (server.cjs). */
+    const stopped = notFound && typeof renderCtx.req?.url === "string" ? ctx.stoppedZoneOf?.(renderCtx.req.url.split("?")[0]) : null;
+    if (stopped) ctx.markStopped(renderCtx.req, renderCtx.res, stopped);
+    const zone = notFound ? zoneOfRequest(renderCtx.req) : null;
     if (!zone) return renderPageComponent.call(this, renderCtx, bubbleNoFallback);
     return notFoundZone.run(zone, () => renderPageComponent.call(this, renderCtx, bubbleNoFallback));
   };

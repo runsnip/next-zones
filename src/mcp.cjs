@@ -20,7 +20,7 @@
  */
 const KIND = Symbol.for("@runsnip/next-zones/mcp");
 const NAME = /^[A-Za-z0-9_.-]{1,128}$/;
-const ZONES_CAPABILITIES = ["read", "pull", "install", "prune"];
+const ZONES_CAPABILITIES = ["read", "pull", "install", "prune", "stop"];
 
 const kindOf = (value) => (value && typeof value === "object" ? value[KIND] : undefined);
 const tag = (kind, value) => Object.defineProperty(value, KIND, { value: kind, enumerable: false });
@@ -102,18 +102,19 @@ function Tool(tool = {}) {
   return tag("tool", { name, title, description, input, output, annotations, scopes, zones: [].concat(zones), timeoutMs, handler });
 }
 
-const LIVE_PULL_TOOLS = ["status", "images", "pull", "install"];
+const LIVE_PULL_TOOLS = ["status", "images", "pull", "install", "stop", "resume"];
 /**
- * Zones' own tools for releases: zones_status, zones_images, zones_pull and zones_install. A pull, and an install of a
- * version the store lacks, are pulls on request: the zone must declare livePull, as for the admin URLs.
+ * Zones' own tools for releases: zones_status, zones_images, zones_pull, zones_install, zones_stop and zones_resume. A
+ * pull, and an install of a version the store lacks, are pulls on request: the zone must declare livePull, as for the
+ * admin URLs.
  * @param {object} [options]
- * @param {string[]} [options.tools] which of "status", "images", "pull", "install" (all by default)
- * @param {string[]} [options.scopes] OAuth scopes a caller needs for pull and install (reading needs none)
+ * @param {string[]} [options.tools] which of "status", "images", "pull", "install", "stop", "resume" (all by default)
+ * @param {string[]} [options.scopes] OAuth scopes a caller needs for every tool but status and images (reading needs none)
  */
 function LivePull({ tools = LIVE_PULL_TOOLS, scopes = [] } = {}) {
   const unknown = tools.filter((t) => !LIVE_PULL_TOOLS.includes(t));
   if (unknown.length) fail("LivePull", `unknown tools ${unknown.join(", ")} (known: ${LIVE_PULL_TOOLS.join(", ")})`);
-  return tools.map((t) => tag("tool", { builtin: `zones_${t}`, name: `zones_${t}`, scopes: t === "pull" || t === "install" ? scopes : [] }));
+  return tools.map((t) => tag("tool", { builtin: `zones_${t}`, name: `zones_${t}`, scopes: t === "status" || t === "images" ? [] : scopes }));
 }
 
 /**

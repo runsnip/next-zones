@@ -144,8 +144,12 @@ function createZones(options = {}) {
     collect: (options) => collector.collect(options),
     /** What boot installed: zone → { version, ok, error? }. */
     boot: installer.boot,
-    /** The installed zones: name → { version, mount }. */
-    zones: () => Object.fromEntries([...ctx.zones.values()].map((z) => [z.name, { version: z.version, mount: z.mount }])),
+    /** Every zone and its state: serving, stopped, failed (at boot) or available (images in the store only). */
+    zones: () => installer.describe(),
+    /** Stops a zone: its URLs answer 404 (x-next-zones-state: stopped); it stays installed. */
+    stop: (name) => installer.stop(name),
+    /** Resumes a stopped zone: the build it had serves again, with no install. */
+    resume: (name) => installer.resume(name),
     async close() {
       for (const res of ctx.listeners) res.end();
       await new Promise((resolve) => (httpServer ? httpServer.close(resolve) : resolve()));

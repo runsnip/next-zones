@@ -9,7 +9,7 @@ server without a restart.
 >   - the zone declaration (`zoneConfig`);
 >   - the CLI: `init`, `add`, `check`, `doctor`, `dev`, `build`, `start`, `serve`, `install`, `pack`, `pull`, `prune`,
 >     `watch`;
->   - Zones (`createZones`), which installs and swaps zones at run time;
+>   - Zones (`createZones`), which installs, swaps, stops and resumes zones at run time;
 >   - one combined build of every zone (`mode: "single"`, the composer);
 >   - `<ZoneUpdates />`;
 >   - metrics: Zones' own and any zone's, as Prometheus text (`@runsnip/next-zones/metrics`);

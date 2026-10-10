@@ -31,7 +31,7 @@ function createCollector(ctx) {
     const removed = [], pinned = [];
     const kept = new Set();
     for (const [name, versions] of ctx.history) {
-      const active = ctx.zones.get(name)?.version;
+      const active = ctx.installedZone(name)?.version;              // a stopped zone's version stays loaded
       /* slice(-0) is the whole list: keep 0 keeps none. */
       const previous = keep > 0 && !only ? versions.filter((v) => v !== active).slice(-keep) : [];
       for (const v of [active, ...previous]) if (v !== undefined) kept.add(`${name}@${v}`);
