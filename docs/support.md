@@ -95,7 +95,7 @@ Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router and Pages Router. Key:
 | | |
 |---|---|
 | Zones as an MCP server (`zoneConfig({ mcp })`), with every endpoint off | ✅ ([Zones as an MCP server](mcp.md)) |
-| Zones' tools: status, images, pull, install (live pulls), metrics | ✅ |
+| Zones' tools: status, images, pull, install (live pulls), stop, resume, metrics | ✅ |
 | Tools of your own, their arguments checked, their reach into Zones declared, time-limited | ✅ |
 | Skills as resources and prompts | ✅ |
 | Bearer tokens, OAuth 2.1 access tokens (JWT with JWKS, or introspection), protected resource metadata | ✅ |
