@@ -53,8 +53,8 @@ server without a restart.
 > **Status: pre-release.** It targets Next.js **16.4.0** and **16.3.8** (and 16.3.6, 16.3.7), App Router and Pages Router, production server.
 > - **Available:**
 >   - the zone declaration (`zoneConfig`);
->   - the CLI: `init`, `add`, `check`, `doctor`, `dev`, `build`, `start`, `serve`, `install`, `pack`, `pull`, `prune`,
->     `watch`;
+>   - the CLI: `init`, `add`, `check`, `doctor`, `dev`, `build`, `start`, `serve`, `install`, `zones`, `stop`, `resume`,
+>     `pack`, `pull`, `prune`, `watch`;
 >   - Zones (`createZones`), which installs, swaps, stops and resumes zones at run time;
 >   - one combined build of every zone (`mode: "single"`, the composer);
 >   - `<ZoneUpdates />`;
