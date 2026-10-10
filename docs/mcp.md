@@ -109,12 +109,12 @@ Leave `skills` out when there are none.
 `auth` takes any number of methods; a request passes with one of them. Without `auth`, the admin rule holds: the admin
 token (`NEXT_ZONES_ADMIN_TOKEN`) as a bearer token, or, when none is set, a request from the same machine.
 
-| | | |
-|---|---|---|
-| `Bearer({ token })`, `Bearer({ tokens })` | Static tokens (16 characters or more), compared in constant time | |
-| `Bearer({ env: "MCP_TOKEN" })` | The token from the environment, read when Zones starts: it stays out of the config. Zones refuses to start when it is unset | |
-| `Bearer({ verify })` | `verify(token, { headers })` decides: what it returns (`{ subject, scopes }`) is the caller | |
-| `OAuth({ issuer, audience, scopes })` | OAuth 2.1 access tokens, as the MCP authorization spec has it (below) | |
+| Method | What passes |
+|---|---|
+| `Bearer({ token })`, `Bearer({ tokens })` | Static tokens (16 characters or more), compared in constant time |
+| `Bearer({ env: "MCP_TOKEN" })` | The token from the environment, read when Zones starts: it stays out of the config. Zones refuses to start when it is unset |
+| `Bearer({ verify })` | `verify(token, { headers })` decides: what it returns (`{ subject, scopes }`) is the caller |
+| `OAuth({ issuer, audience, scopes })` | OAuth 2.1 access tokens, as the MCP authorization spec has it (below) |
 
 **OAuth.** Zones is a resource server:
 - it publishes its protected resource metadata (RFC 9728) at `/.well-known/oauth-protected-resource<path>`, naming
