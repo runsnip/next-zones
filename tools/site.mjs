@@ -9,7 +9,8 @@
  * - docs/<page>.html for each page of docs/ (docs/index.html for docs/README.md), in the order docs/README.md lists
  *   them, each linking its markdown on GitHub (an alternate, as llmstxt.org suggests);
  * - llms.txt and llms-full.txt at the root, as the package ships them;
- * - site.css, favicon.ico, icon.png, apple-touch-icon.png, robots.txt, sitemap.xml.
+ * - site.css, site.js (a copy button on every code block), favicon.ico, icon.png, apple-touch-icon.png, robots.txt,
+ *   sitemap.xml.
  * Markdown is rendered with markdown-it (chosen by benchmark against marked and micromark: the fastest, the same
  * output), headings get GitHub's anchors, so the docs' links (`zones.md#endpoints`) work as they do on GitHub.
  */
@@ -81,6 +82,30 @@ const hljs = createRequire(import.meta.url)("highlight.js/lib/core");
 for (const name of ["javascript", "typescript", "xml", "bash", "json"]) hljs.registerLanguage(name, createRequire(import.meta.url)(`highlight.js/lib/languages/${name}`));
 const LANGUAGES = { js: "javascript", mjs: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript", sh: "bash", bash: "bash", json: "json" };
 const highlight = (code, lang) => (LANGUAGES[lang] ? hljs.highlight(code, { language: LANGUAGES[lang], ignoreIllegals: true }).value : esc(code));
+/* site.js, every page's one script: a copy button on every code block, its icons @runsnip/icons' copy and check from
+   the CDN's build (any element with data-rs-icon becomes the icon's <svg>, its class kept). Kept in one file, so a
+   change to it is one file to publish. */
+const SITE_JS = `/* next-zones.runsnip.net: a copy button on every code block (tools/site.mjs writes this file). */
+const ICONS = "https://cdn.jsdelivr.net/npm/@runsnip/icons@0.3.0";
+for (const pre of document.querySelectorAll("pre")) {
+  if (!pre.querySelector("code") || pre.parentElement.classList.contains("code")) continue;
+  const box = document.createElement("div");
+  box.className = "code";
+  pre.replaceWith(box);
+  box.innerHTML = '<button type="button" class="copy" aria-label="Copy"><i data-rs-icon="copy" data-rs-size="15" class="idle"></i><i data-rs-icon="check" data-rs-size="15" class="ok"></i></button>';
+  box.append(pre);
+}
+const icons = document.createElement("script");
+icons.src = ICONS;
+icons.onload = () => window.RunSnipLoad?.();
+document.head.append(icons);
+document.addEventListener("click", (e) => {
+  const button = e.target.closest?.(".copy");
+  if (!button) return;
+  const done = () => { button.classList.add("done"); button.setAttribute("aria-label", "Copied"); setTimeout(() => { button.classList.remove("done"); button.setAttribute("aria-label", "Copy"); }, 1400); };
+  try { navigator.clipboard.writeText(button.parentElement.querySelector("code").textContent).then(done, () => {}); } catch {}
+});
+`;
 /* A shell command of the home page, as a highlighted block. */
 const shell = (cmd) => `<pre><code class="language-sh">${highlight(cmd, "sh")}</code></pre>`;
 
@@ -134,6 +159,14 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outlin
 code, pre { font-family: var(--mono); font-size: 13px; }
 :not(pre) > code { background: var(--code); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
 pre { background: var(--code); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; overflow-x: auto; line-height: 1.5; }
+.code { position: relative; }
+.code pre { padding-right: 48px; }
+.copy { position: absolute; top: 7px; right: 7px; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--muted); cursor: pointer; opacity: 0; transition: opacity .15s, color .15s; }
+.code:hover .copy, .copy:focus-visible, .copy.done { opacity: 1; }
+.copy:hover { color: var(--fg); }
+.copy .ok, .copy.done .idle { display: none; }
+.copy.done .ok { display: block; color: var(--accent); }
+@media (hover: none) { .copy { opacity: 1; } }
 .hljs-keyword, .hljs-meta .hljs-keyword, .hljs-doctag { color: var(--hl-keyword); }
 .hljs-string, .hljs-regexp, .hljs-meta .hljs-string { color: var(--hl-string); }
 .hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
@@ -201,7 +234,8 @@ section.band h2 { font: 700 26px/1.2 var(--display); margin: 0 0 14px; }
 .steps > div { counter-increment: s; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 4px 12px; align-items: start; }
 .steps > div::before { content: counter(s); width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font: 600 13px/26px var(--body); text-align: center; }
 .steps p { margin: 2px 0 6px; }
-.steps pre { margin: 0; grid-column: 2; }
+.steps .code { grid-column: 2; }
+.steps pre { margin: 0; }
 @media (max-width: 860px) {
   .docs { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .side { position: static; max-height: none; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
@@ -241,6 +275,7 @@ ${markdown ? `<link rel="alternate" type="text/markdown" href="${markdown}">` : 
 <meta name="theme-color" content="#2357d6">
 ${FONTS}
 <link rel="stylesheet" href="${base}site.css">
+<script src="${base}site.js" defer></script>
 </head>
 <body>
 <header class="top"><div class="in">
@@ -372,6 +407,7 @@ export function buildSite() {
   });
   fs.writeFileSync(path.join(out, "index.html"), home());
   fs.writeFileSync(path.join(out, "site.css"), CSS.trim() + "\n");
+  fs.writeFileSync(path.join(out, "site.js"), SITE_JS);
   fs.copyFileSync(path.join(root, "llms.txt"), path.join(out, "llms.txt"));
   fs.writeFileSync(path.join(out, "llms-full.txt"), llmsFull());
   for (const [from, to] of [["favicon.ico", "favicon.ico"], ["icon.png", "icon.png"], ["apple-icon.png", "apple-touch-icon.png"]]) fs.copyFileSync(path.join(ICONS, from), path.join(out, to));
