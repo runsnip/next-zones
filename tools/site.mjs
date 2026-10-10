@@ -74,8 +74,18 @@ function siteLink(href) {
   return href;
 }
 
+/* Code blocks are coloured with highlight.js when the site is built, not in the browser: the pages need no script and
+   never show a block uncoloured first. Only the languages the docs use are loaded; a block in any other (a file tree)
+   stays plain. xml is what highlight.js colours JSX with. */
+const hljs = createRequire(import.meta.url)("highlight.js/lib/core");
+for (const name of ["javascript", "typescript", "xml", "bash", "json"]) hljs.registerLanguage(name, createRequire(import.meta.url)(`highlight.js/lib/languages/${name}`));
+const LANGUAGES = { js: "javascript", mjs: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript", sh: "bash", bash: "bash", json: "json" };
+const highlight = (code, lang) => (LANGUAGES[lang] ? hljs.highlight(code, { language: LANGUAGES[lang], ignoreIllegals: true }).value : esc(code));
+/* A shell command of the home page, as a highlighted block. */
+const shell = (cmd) => `<pre><code class="language-sh">${highlight(cmd, "sh")}</code></pre>`;
+
 function renderer() {
-  const md = new MarkdownIt({ html: false, linkify: false, typographer: false });
+  const md = new MarkdownIt({ html: false, linkify: false, typographer: false, highlight });
   const slug = slugger();
   md.core.ruler.push("anchors", (state) => {
     for (let i = 0; i < state.tokens.length; i++) {
@@ -102,16 +112,19 @@ const CSS = `
 :root {
   --bg: #f7f8fa; --surface: #ffffff; --fg: #15181d; --muted: #5d6573; --line: #e2e5ea; --code: #f0f2f5;
   --accent: #2357d6; --accent-soft: #e5ecfc;
+  --hl-keyword: #cf222e; --hl-string: #0a3069; --hl-comment: #59636e; --hl-title: #8250df; --hl-number: #0550ae; --hl-tag: #116329;
   --display: "Bricolage Grotesque", "IBM Plex Sans", system-ui, sans-serif;
   --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --bg: #111317; --surface: #191c21; --fg: #e8eaee; --muted: #9aa2ae; --line: #2a2f37; --code: #1f232a;
-  --accent: #7ea2ff; --accent-soft: #1d2a47; color-scheme: dark } }
+  --accent: #7ea2ff; --accent-soft: #1d2a47;
+  --hl-keyword: #ff7b72; --hl-string: #a5d6ff; --hl-comment: #8b949e; --hl-title: #d2a8ff; --hl-number: #79c0ff; --hl-tag: #7ee787; color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #111317; --surface: #191c21; --fg: #e8eaee; --muted: #9aa2ae; --line: #2a2f37; --code: #1f232a;
-  --accent: #7ea2ff; --accent-soft: #1d2a47; color-scheme: dark }
+  --accent: #7ea2ff; --accent-soft: #1d2a47;
+  --hl-keyword: #ff7b72; --hl-string: #a5d6ff; --hl-comment: #8b949e; --hl-title: #d2a8ff; --hl-number: #79c0ff; --hl-tag: #7ee787; color-scheme: dark }
 * { box-sizing: border-box; }
 html { scroll-padding-top: 72px; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.6 var(--body); }
@@ -121,6 +134,14 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outlin
 code, pre { font-family: var(--mono); font-size: 13px; }
 :not(pre) > code { background: var(--code); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
 pre { background: var(--code); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; overflow-x: auto; line-height: 1.5; }
+.hljs-keyword, .hljs-meta .hljs-keyword, .hljs-doctag { color: var(--hl-keyword); }
+.hljs-string, .hljs-regexp, .hljs-meta .hljs-string { color: var(--hl-string); }
+.hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
+.hljs-title, .hljs-title.class_, .hljs-title.function_ { color: var(--hl-title); }
+.hljs-number, .hljs-literal, .hljs-literal .hljs-keyword, .hljs-built_in, .hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable.language_, .hljs-meta, .hljs-symbol, .hljs-type { color: var(--hl-number); }
+.hljs-name, .hljs-selector-tag { color: var(--hl-tag); }
+.hljs-tag, .hljs-subst, .hljs-params { color: var(--fg); }
+.language-sh .hljs-built_in { color: inherit; }
 .top { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
 .top .in { max-width: 1180px; margin: 0 auto; padding: 0 16px; height: 56px; display: flex; align-items: center; gap: 18px; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--fg); font: 700 18px var(--display); white-space: nowrap; flex: none; }
@@ -316,10 +337,10 @@ function home() {
 <section class="band">
   <h2>Start</h2>
   <div class="steps">
-    <div><p>A workspace: a shared package, the shell (the zone at <code>/</code>) and two zones.</p><pre><code>npx @runsnip/next-zones init my-app blog shop</code></pre></div>
-    <div><p>Develop every zone at once.</p><pre><code>cd my-app &amp;&amp; npx next-zones dev .</code></pre></div>
-    <div><p>Build the shell and each zone's image, and serve them.</p><pre><code>npx next-zones build &amp;&amp; npx next-zones start</code></pre></div>
-    <div><p>Release one zone while it serves.</p><pre><code>npx next-zones build blog &amp;&amp; npx next-zones install blog 1.1.0</code></pre></div>
+    <div><p>A workspace: a shared package, the shell (the zone at <code>/</code>) and two zones.</p>${shell("npx @runsnip/next-zones init my-app blog shop")}</div>
+    <div><p>Develop every zone at once.</p>${shell("cd my-app && npx next-zones dev .")}</div>
+    <div><p>Build the shell and each zone's image, and serve them.</p>${shell("npx next-zones build && npx next-zones start")}</div>
+    <div><p>Release one zone while it serves.</p>${shell("npx next-zones build blog && npx next-zones install blog 1.1.0")}</div>
   </div>
   <p class="edit">Next.js 16.3.6, 16.3.7, 16.3.8 or 16.4.0, and Node.js 24. <a href="docs/getting-started.html">Getting started</a> walks through it.</p>
 </section>
