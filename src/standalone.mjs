@@ -84,7 +84,7 @@ export async function prepareStandaloneZones({ shellDir, declaration, store, pin
   /* next-zones, which the shell's server trace does not reach (the shell imports its client only). */
   const own = path.join(root, "node_modules", "@runsnip", "next-zones");
   fs.rmSync(own, { recursive: true, force: true });
-  for (const entry of ["package.json", "tsconfig", "LICENSE", "NOTICE"]) {
+  for (const entry of ["package.json", "tsconfig", "skills", "LICENSE", "NOTICE"]) {
     if (fs.existsSync(path.join(PACKAGE_DIR, entry))) fs.cpSync(path.join(PACKAGE_DIR, entry), path.join(own, entry), { recursive: true });
   }
   /* Its code, where its package.json's exports point (dist/), whichever folder it runs from. */
@@ -92,8 +92,21 @@ export async function prepareStandaloneZones({ shellDir, declaration, store, pin
   /* What Zones' server needs that the shell's own trace did not reach (Next's modules it hooks or calls, its workers'),
      traced the way Next traces server.js (Next's own @vercel/nft) and copied in where missing. */
   await traceZonesRuntime({ shellDir, root });
-  /* The shell's declaration, which Zones reads from next.config elsewhere. */
-  fs.writeFileSync(path.join(dir, ".next", "zones-shell.json"), JSON.stringify(declaration, null, 2) + "\n");
+  /* The shell's declaration, which Zones reads from next.config elsewhere. An MCP server's (Mcp(…)) holds code (its
+     tools' handlers, a Bearer's verify), which no record keeps: the shell's next.config is copied in, with what it
+     imports (traced as above), and Zones reads the MCP server from it; its skill folders are copied too. */
+  const recorded = { ...declaration };
+  if (declaration?.mcp) {
+    const config = ["next.config.mjs", "next.config.js", "next.config.ts", "next.config.mts"].map((f) => path.join(shellDir, f)).find((f) => fs.existsSync(f));
+    fs.copyFileSync(config, path.join(dir, path.basename(config)));
+    await traceInto({ shellDir, root, entries: [fs.realpathSync(config)] });
+    for (const skill of declaration.mcp.skills ?? []) {
+      if (!skill.dir || skill.dir.startsWith("file:") || path.isAbsolute(skill.dir)) continue;
+      fs.cpSync(path.resolve(shellDir, skill.dir), path.resolve(dir, skill.dir), { recursive: true, dereference: true });
+    }
+    recorded.mcp = { fromConfig: path.basename(config) };
+  }
+  fs.writeFileSync(path.join(dir, ".next", "zones-shell.json"), JSON.stringify(recorded, null, 2) + "\n");
   /* The images built and the pins: the folder is the whole deploy. */
   if (store && fs.existsSync(store)) {
     fs.cpSync(store, path.join(dir, ".zones-store"), { recursive: true, verbatimSymlinks: true });

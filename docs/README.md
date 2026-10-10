@@ -12,7 +12,8 @@ server without a restart.
 >   - Zones (`createZones`), which installs and swaps zones at run time;
 >   - one combined build of every zone (`mode: "single"`, the composer);
 >   - `<ZoneUpdates />`;
->   - metrics: Zones' own and any zone's, as Prometheus text (`@runsnip/next-zones/metrics`).
+>   - metrics: Zones' own and any zone's, as Prometheus text (`@runsnip/next-zones/metrics`);
+>   - Zones as an MCP server: its tools, yours, skills, Bearer and OAuth (`@runsnip/next-zones/mcp`).
 
 ## Why
 
@@ -43,7 +44,8 @@ next-zones keeps the separation (each zone builds, versions and deploys on its o
 10. [Zones: live installs](zones.md)
 11. [Metrics](metrics.md)
 12. [Zones on the Pages Router](pages-router.md)
-13. [What is supported](support.md)
+13. [Zones as an MCP server](mcp.md)
+14. [What is supported](support.md)
 
 ## For assistants
 

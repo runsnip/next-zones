@@ -25,9 +25,20 @@ for (const [zone, from] of [["shell", "shell"], ["blog", "fixtures/blog"], ["sho
   const file = path.join(dir, zone, "package.json");
   fs.writeFileSync(file, JSON.stringify({ ...JSON.parse(fs.readFileSync(file, "utf8")), name: `standalone-${zone}`, version: "1.0.0" }, null, 2));
 }
+/* The shell's MCP server holds code (a tool from a module of the shell's own) and a skill folder: the standalone
+   folder must carry both, as no record keeps code. */
 fs.writeFileSync(path.join(dir, "shell", "next.config.mjs"), `import { zoneConfig } from "@runsnip/next-zones/config";
-export default zoneConfig({ mount: "/", endpoints: { events: true, health: true, admin: true } }, { output: "standalone" });
+import { Mcp, Tools, LivePull, Skills } from "@runsnip/next-zones/mcp";
+import { greet } from "./mcp/greet.mjs";
+export default zoneConfig({ mount: "/", endpoints: { events: true, health: true, admin: true }, mcp: Mcp({ tools: Tools(LivePull({ tools: ["status"] }), greet), skills: Skills("./mcp/skills/release") }) }, { output: "standalone" });
 `);
+fs.mkdirSync(path.join(dir, "shell", "mcp", "skills", "release"), { recursive: true });
+fs.writeFileSync(path.join(dir, "shell", "mcp", "greet.mjs"), `import { Tool } from "@runsnip/next-zones/mcp";
+import { word } from "./word.mjs";
+export const greet = Tool({ name: "greet", description: "Greets", input: { type: "object", properties: { who: { type: "string" } } }, handler: ({ who }) => \`\${word} \${who}\` });
+`);
+fs.writeFileSync(path.join(dir, "shell", "mcp", "word.mjs"), `export const word = "hello from the standalone shell to";\n`);
+fs.writeFileSync(path.join(dir, "shell", "mcp", "skills", "release", "SKILL.md"), "---\nname: release\ndescription: How to release\n---\n# Release a zone\n");
 const blogConfig = path.join(dir, "blog", "next.config.mjs");
 fs.writeFileSync(blogConfig, fs.readFileSync(blogConfig, "utf8").replace("serverExternalPackages:", `output: "standalone",\n    serverExternalPackages:`));
 if (!/output: "standalone"/.test(fs.readFileSync(blogConfig, "utf8"))) throw new Error("blog's next.config was not given output: standalone");
@@ -60,6 +71,15 @@ try {
   for (const p of ["/", "/about", "/blog", "/blog/42", "/shop", "/post/3", "/blog/logo.png", "/_next-zones/health"]) statuses[p] = (await get(p)).status;
   seen.statuses = statuses;
   if (Object.values(statuses).some((s) => s !== 200)) wrong.statuses = statuses;
+  /* The MCP server, from the shell's next.config carried into the folder: its own tool (and the module it imports),
+     its skill folder. */
+  const mcp = async (method, params = {}) => (await (await fetch(`${BASE}/_next-zones/mcp`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).json());
+  seen.mcp = {
+    greet: (await mcp("tools/call", { name: "greet", arguments: { who: "you" } })).result?.content?.[0]?.text,
+    status: (await mcp("tools/call", { name: "zones_status", arguments: {} })).result?.structuredContent?.zones?.blog,
+    skill: (await mcp("resources/read", { uri: "skill://release/SKILL.md" })).result?.contents?.[0]?.text?.includes("# Release a zone"),
+  };
+  if (seen.mcp.greet !== "hello from the standalone shell to you" || seen.mcp.status !== "1.0.0" || !seen.mcp.skill) wrong.mcp = { ...seen.mcp, log: log.slice(-1500) };
   const ext = await get("/blog/ext");
   seen.ext = /zone blog ext (<!-- -->)?from an external package/.test(ext.body) ? "from an external package" : ext.status;
   if (seen.ext !== "from an external package") wrong.ext = { status: ext.status, body: ext.body.slice(0, 300), log: log.slice(-1500) };

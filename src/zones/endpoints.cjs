@@ -16,6 +16,8 @@
  *           POST <base>/collect?keep=2                 collects old versions' loaded code and caches
  *           POST <base>/policy                         replaces the instrumentation policy
  *           <base>/debug, <base>/bench                 with createZones({ debug: true })
+ *   mcp     POST <mcp path>                            Zones' MCP server (mcp.cjs), with zoneConfig({ mcp }), whatever
+ *                                                      groups are declared
  *
  * Admin means `Authorization: Bearer <adminToken>`, or a request from the same machine when no token is configured.
  * A zone image never travels over these endpoints: they ask Zones to pull it, and Zones fetches it from its sources.
@@ -115,20 +117,28 @@ function createEndpoints(ctx, { installer, collector, bench, debugInfo }) {
     req.on("close", () => { clearInterval(keepAlive); ctx.listeners.delete(res); });
   }
 
-  /* Health, for a supervisor (Docker's HEALTHCHECK): 200 once Zones serves. A zone that failed at boot does not make it
-     unhealthy, since a restart would not fix its build: it is reported as degraded. Details only to an admin. */
-  function health(req, res) {
+  /* What Zones serves now: the active versions, the zones that failed at boot, uptime and memory. */
+  function status() {
     const failed = Object.entries(installer.boot()).filter(([, r]) => !r.ok).map(([zone, r]) => ({ zone, version: r.version, error: r.error }));
-    if (!authorized(req)) return json(res, 200, { ok: true, degraded: failed.length > 0 });
-    return json(res, 200, {
+    return {
       ok: true, degraded: failed.length > 0, failed,
       zones: Object.fromEntries([...ctx.zones.values()].map((z) => [z.name, z.version])),
       uptimeS: Math.round(process.uptime()), rssMB: +(process.memoryUsage().rss / 1048576).toFixed(1), reclaimed: ctx.reclaimed,
-    });
+    };
+  }
+
+  /* Health, for a supervisor (Docker's HEALTHCHECK): 200 once Zones serves. A zone that failed at boot does not make it
+     unhealthy, since a restart would not fix its build: it is reported as degraded. Details only to an admin. */
+  function health(req, res) {
+    const now = status();
+    if (!authorized(req)) return json(res, 200, { ok: true, degraded: now.degraded });
+    return json(res, 200, now);
   }
 
   /** Answers a request for one of the declared endpoints; returns false when the request is not for them. */
   async function handle(req, res, url) {
+    /* Zones' MCP server (mcp.cjs), at its own path, whatever endpoints are declared. */
+    if (ctx.mcp && (await ctx.mcp.handle(req, res, url))) return true;
     const declared = ctx.endpoints;
     /* The metrics store as Prometheus text, to an admin (metrics.cjs), when the shell turned metrics on: under the
        declared base, or the default one when no endpoint group is declared. */
@@ -150,7 +160,7 @@ function createEndpoints(ctx, { installer, collector, bench, debugInfo }) {
     return true;
   }
 
-  return { handle };
+  return { handle, status, list };
 }
 
 module.exports = { createEndpoints };

@@ -88,6 +88,19 @@ Next.js 16.3.6, 16.3.7, 16.3.8 and 16.4.0, App Router and Pages Router. Key:
 | A pull that would fill the disk | ✅ refused before it starts, or stopped while it runs ([the disk](zones.md#the-disk)) |
 | Pruning old images, automatically or on request | ✅ ([pruning](zones.md#pruning)) |
 
+## MCP
+
+| | |
+|---|---|
+| Zones as an MCP server (`zoneConfig({ mcp })`), with every endpoint off | ✅ ([Zones as an MCP server](mcp.md)) |
+| Zones' tools: status, images, pull, install (live pulls), metrics | ✅ |
+| Tools of your own, their arguments checked, their reach into Zones declared, time-limited | ✅ |
+| Skills as resources and prompts | ✅ |
+| Bearer tokens, OAuth 2.1 access tokens (JWT with JWKS, or introspection), protected resource metadata | ✅ |
+| `output: "standalone"`: the MCP server's code carried into the folder | ✅ |
+| Server-initiated streams (sampling, elicitation, notifications) | 🔧 the transport is stateless today |
+| A tool isolated from Zones' process | 🔧 run untrusted code as a service of its own, behind a tool that calls it |
+
 ## One app
 
 | | |

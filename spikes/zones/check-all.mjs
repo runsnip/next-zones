@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 
 const CHECKS = ["browse", "features", "bound", "swap", "links", "alias", "media", "routing", "rules", "routes", "proxy",
-  "revalidate", "instrumentation", "shared", "concurrent", "swapload", "signal", "external", "params", "miss", "many", "cc", "sharedver", "context", "standalone", "composed", "doctor", "init", "contract", "collect", "integrity", "health", "pull", "endpoints", "endpointsoff", "endpointsbase", "localdeps", "prune", "release", "single", "singlestandalone", "singleexport", "zonesstandalone", "zonesexport", "ownhandler", "reclaim", "lrumem", "isrswap", "widths", "leak", "metrics", "pagesrouter", "composedpages", "singlepages", "singlepagesstandalone", "notfound"];
+  "revalidate", "instrumentation", "shared", "concurrent", "swapload", "signal", "external", "params", "miss", "many", "cc", "sharedver", "context", "standalone", "composed", "doctor", "init", "contract", "collect", "integrity", "health", "pull", "endpoints", "endpointsoff", "endpointsbase", "localdeps", "prune", "release", "single", "singlestandalone", "singleexport", "zonesstandalone", "zonesexport", "ownhandler", "reclaim", "lrumem", "isrswap", "widths", "leak", "metrics", "pagesrouter", "composedpages", "singlepages", "singlepagesstandalone", "notfound", "mcp"];
 /* Checks that need their own setup: the environment for Zones and the check. */
 const SETUP = {
   /* A non-public env variable only the server may read (leak.mjs looks for it in everything a browser can fetch). */
@@ -63,6 +63,12 @@ const SETUP = {
     return { NEXT_ZONES_STORE: store, NEXT_ZONES_SOURCE: source, NEXT_ZONES_PRUNE_KEEP: "1", NEXT_ZONES_PERSIST: "on" };
   },
   endpointsoff: () => ({ NEXT_ZONES_ENDPOINTS: "off" }),
+  /* MCP with every endpoint off: it is Zones' own, whatever endpoints are declared. */
+  mcp: () => {
+    /* An empty source: a pull on request reaches it only for a zone that allows live pulls. */
+    const source = fs.mkdtempSync(path.join(os.tmpdir(), "nz-mcp-source-"));
+    return { NEXT_ZONES_ENDPOINTS: "off", NEXT_ZONES_SOURCE: source };
+  },
   endpointsbase: () => ({ NEXT_ZONES_ENDPOINTS: "/_ops" }),
   /* A shell and a zone with Cache Components (fixtures-cc), on their own store. */
   cc: () => ({ NEXT_ZONES_SHELL: "fixtures-cc/shell", NEXT_ZONES_STORE: ".zones-store-cc", PORT: "3900" }),
@@ -82,6 +88,9 @@ fs.rmSync(path.join("node_modules", "@runsnip", "next-zones", "dist"), { recursi
 fs.cpSync("../../dist/", path.join("node_modules", "@runsnip", "next-zones", "dist"), { recursive: true });
 /* Its exports map too (a new subpath, such as ./metrics, is resolved from it). */
 fs.copyFileSync("../../package.json", path.join("node_modules", "@runsnip", "next-zones", "package.json"));
+/* Its skills (NextZonesSkill() serves skills/next-zones). */
+fs.rmSync(path.join("node_modules", "@runsnip", "next-zones", "skills"), { recursive: true, force: true });
+fs.cpSync("../../skills", path.join("node_modules", "@runsnip", "next-zones", "skills"), { recursive: true });
 const BASE = "http://127.0.0.1:3900";
 
 async function startZones(env) {

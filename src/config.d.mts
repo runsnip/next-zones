@@ -26,6 +26,11 @@ export interface Zone {
    * default; off, the metrics functions do nothing.
    */
   metrics?: boolean;
+  /**
+   * The shell only: Zones as an MCP server, made with Mcp({ tools, skills, auth }) from `@runsnip/next-zones/mcp`, at
+   * its own path whatever endpoints are declared.
+   */
+  mcp?: import("./mcp.d.cts").McpServer;
 }
 
 /** The URLs a Zones service serves of its own, under one base path; each group off unless set. */

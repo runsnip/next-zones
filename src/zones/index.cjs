@@ -65,6 +65,7 @@ process.once("exit", () => { if (claimed) releaseStore(claimed); });
  * @param {object} [options.pins]       zone → version installed at boot; the store's state.json is read over them,
  *                                       unless the pins are newer (options.pinsAt, ms: a new build or deploy)
  * @param {object|false} [options.endpoints] the URLs Zones serves of its own, over the shell's declaration (endpoints.cjs)
+ * @param {object|false} [options.mcp]  Zones' MCP server, Mcp(…) from ../mcp.cjs, over the shell's declaration (mcp.cjs)
  * @param {object[]} [options.sources]  where zone images are pulled from (../sources.cjs): the only way one enters the store
  * @param {object|false} [options.prune] { keep: 2, auto: true }: old zone images removed after each pull and install,
  *                                       keeping the active, pinned and `keep` previous versions (prune.cjs); false: never

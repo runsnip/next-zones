@@ -54,6 +54,7 @@ const DESCRIPTIONS = {
   updates: "<ZoneUpdates />: open tabs follow a newly installed version. And what every zone needs: Next and React versions, one workspace, the shell's URL settings.",
   zones: "Zones, the server that installs zone images while it runs: the store, its endpoints, installs and rollbacks, pulls, pruning, supported Next versions.",
   metrics: "Zones' own metrics and any zone's, as Prometheus text: what is measured, how to read it, and how a zone measures its own.",
+  mcp: "Zones as an MCP server: Zones' own tools and yours, skills, Bearer and OAuth authorization, and how it is deployed.",
   "pages-router": "Zones on the Pages Router: their files, how their pages are served, live installs, and how they work in every mode.",
   support: "Every area of Next.js under Zones, and how it behaves: what works, what is planned, what a zone may not do.",
 };

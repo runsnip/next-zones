@@ -6,6 +6,7 @@
  *     mount: "/blog",
  *     aliases: [{ source: "/post/:id", destination: "/blog/:id" }],
  *     livePull: true,                               // a ping to Zones may make it pull this zone's images (off by default)
+ *     // the shell only: endpoints, mode, metrics, mcp (Mcp(…) from @runsnip/next-zones/mcp)
  *     // …and the zone's own Next config, in the same object
  *   });
  *
@@ -21,6 +22,7 @@ import { createRequire } from "node:module";
 const buildOptions = createRequire(import.meta.url)("./build-options.cjs");
 
 const ZONE = Symbol.for("@runsnip/next-zones/zones");
+const MCP = Symbol.for("@runsnip/next-zones/mcp");
 const SEGMENT = /^\/[a-z0-9][a-z0-9-]*$/;
 const MODES = ["zones", "single"];
 
@@ -55,8 +57,13 @@ export function checkZone(zone, where = "zone") {
     if (mount !== "/") throw new Error(`${where}: metrics is the shell's to declare (mount "/"), not a zone's: a zone's code writes to the shell's store`);
     if (typeof zone.metrics !== "boolean") throw new Error(`${where}: metrics must be true or false, got ${JSON.stringify(zone.metrics)}`);
   }
+  /* Zones as an MCP server (mcp.cjs, zones/mcp.cjs): one for the whole Zones process, so the shell's to declare. */
+  if (zone.mcp !== undefined) {
+    if (mount !== "/") throw new Error(`${where}: mcp is the shell's to declare (mount "/"), not a zone's`);
+    if (zone.mcp?.[MCP] !== "mcp") throw new Error(`${where}: mcp is made with Mcp({ tools, skills, auth }) from @runsnip/next-zones/mcp`);
+  }
   if (zone.output !== undefined) throw new Error(`${where}: output is Next's option, in the zone's Next config (the second argument), not in its zone declaration; the way the workspace is served is mode`);
-  return { mount, aliases, ...(zone.livePull ? { livePull: true } : {}), ...(endpoints ? { endpoints } : {}), ...(zone.mode && zone.mode !== "zones" ? { mode: zone.mode } : {}), ...(zone.metrics ? { metrics: true } : {}) };
+  return { mount, aliases, ...(zone.livePull ? { livePull: true } : {}), ...(endpoints ? { endpoints } : {}), ...(zone.mode && zone.mode !== "zones" ? { mode: zone.mode } : {}), ...(zone.metrics ? { metrics: true } : {}), ...(zone.mcp ? { mcp: zone.mcp } : {}) };
 }
 
 export const DEFAULT_ENDPOINTS_BASE = "/_next-zones";
@@ -109,7 +116,7 @@ function withAliases(config, { aliases }) {
 export const BUILD_OPTIONS = buildOptions.BUILD_OPTIONS;
 
 /* What zoneConfig reads as the zone's declaration; every other key of its options is Next's. */
-const ZONE_KEYS = ["mount", "aliases", "livePull", "endpoints", "mode", "metrics"];
+const ZONE_KEYS = ["mount", "aliases", "livePull", "endpoints", "mode", "metrics", "mcp"];
 
 /**
  * A zone's Next config with its zone declaration: zoneConfig({ mount: "/blog", ...nextConfig }), one object, the

@@ -114,11 +114,22 @@ function createServer(ctx, { assets, installer, bench, collector }) {
     if (ctx.options.metrics ?? shell.metrics) ctx.metrics = require("./zone-metrics.cjs").installZoneMetrics(ctx);
     /* The URLs Zones serves of its own: createZones({ endpoints }) over the shell's declaration; none unless declared. */
     ctx.endpoints = ctx.options.endpoints !== undefined ? normalizeEndpoints(ctx.options.endpoints, "createZones") : (shell.endpoints ?? null);
+    const shellRoutes = () => Object.values(JSON.parse(fs.readFileSync(path.join(ctx.shell, ".next", "app-path-routes-manifest.json"), "utf8")));
     if (ctx.endpoints) {
       const base = ctx.endpoints.base;
-      const shellRoutes = Object.values(JSON.parse(fs.readFileSync(path.join(ctx.shell, ".next", "app-path-routes-manifest.json"), "utf8")));
-      const taken = shellRoutes.filter((r) => r === base || r.startsWith(`${base}/`));
+      const taken = shellRoutes().filter((r) => r === base || r.startsWith(`${base}/`));
       if (taken.length) throw new Error(`next-zones: the endpoints' base ${base} is the shell's: ${taken.join(", ")} (choose another endpoints.base)`);
+    }
+    /* Zones' MCP server: createZones({ mcp }) over the shell's declaration (false: none). A standalone folder records
+       that the declaration holds code, which only the shell's next.config (copied in) can give back. */
+    let mcp = ctx.options.mcp !== undefined ? ctx.options.mcp : shell.mcp;
+    if (mcp?.fromConfig) mcp = (await readZone(ctx.shell))?.mcp;
+    if (mcp) {
+      const { createMcp } = require("./mcp.cjs");
+      ctx.mcp = createMcp(ctx, mcp, { status: endpoints.status, images: endpoints.list, pull: (zone, version) => installer.pullVersion(zone, version, { via: "ping" }),
+        install: (zone, version) => installer.installVersion(zone, version, { via: "ping" }), prune: (options) => installer.prune(options) });
+      const taken = shellRoutes().filter((r) => r === ctx.mcp.path || ctx.mcp.path.startsWith(`${r === "/" ? "" : r}/`) && r !== "/" && !/\[/.test(r));
+      if (taken.includes(ctx.mcp.path)) throw new Error(`next-zones: the MCP server's path ${ctx.mcp.path} is the shell's (choose another Mcp({ path }))`);
     }
     /* The shell must be built for Zones like the zones (build-options.cjs), or the modules they share load twice. What
        counts is the config its build recorded: at run time next.config is loaded again, outside a build for Zones. */

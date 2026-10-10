@@ -70,6 +70,12 @@
       "require": "./dist/metrics.cjs",
       "default": "./dist/metrics.cjs"
     },
+    "./mcp": {
+      "types": "./dist/mcp.d.cts",
+      "import": "./dist/mcp.cjs",
+      "require": "./dist/mcp.cjs",
+      "default": "./dist/mcp.cjs"
+    },
     "./sources": {
       "types": "./dist/sources.d.cts",
       "import": "./dist/sources.cjs",

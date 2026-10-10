@@ -10,6 +10,8 @@ declare namespace nextZonesZones {
     cacheDir?: string;
     /** The URLs Zones serves of its own, over the shell's zoneConfig declaration; false for none. */
     endpoints?: { base?: string; events?: boolean; health?: boolean; admin?: boolean } | false;
+    /** Zones' MCP server, over the shell's zoneConfig({ mcp }); false: none. */
+    mcp?: import("../mcp.d.cts").McpServer | false;
     /** Where zone images are pulled from, tried in order (see @runsnip/next-zones/sources): the only way one enters the store. */
     sources?: { name: string; fetch(request: { zone: string; version: string; into: string; signal?: AbortSignal }): Promise<boolean> }[];
     /** Old zone images removed after each pull and install (default { keep: 2, auto: true }); false: never. */

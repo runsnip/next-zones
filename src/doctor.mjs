@@ -204,6 +204,20 @@ export async function doctor({ dirs, store, url, fast = false, print = console.l
       if (!client && zones.some((o) => o !== shell && routerDir(o.dir, "app"))) warn(z.name, "does not import @runsnip/next-zones/client", "render <ZoneUpdates /> in its root layout: open tabs then follow new versions, and its browser runtime gets every feature a zone's client code may use (Zones refuses a zone that needs one it lacks)");
       if (client && !z.endpoints?.events) warn(z.name, "renders <ZoneUpdates /> but declares no events endpoint, so it does nothing", "declare endpoints: { events: true } in its zoneConfig");
       if (z.endpoints?.events && !client) warn(z.name, "declares the events endpoint but renders no <ZoneUpdates />", "render <ZoneUpdates /> from @runsnip/next-zones/client in its root layout");
+      /* Zones' MCP server (zoneConfig({ mcp })): what Zones would refuse when it starts, or not serve. */
+      if (z.mcp) {
+        const mcpPath = z.mcp.path ?? `${z.endpoints?.base ?? "/_next-zones"}/mcp`;
+        if (z.mode === "single") warn(z.name, "declares mcp, which Zones serves: one app (mode \"single\") has no MCP server", "serve the workspace with Zones (mode \"zones\"), or leave mcp out");
+        if (z.mcp.tools.some((t) => t.builtin === "zones_metrics") && !z.metrics) fail(z.name, "its MCP server has Metrics() but metrics are off", "set metrics: true in its zoneConfig, or leave Metrics() out");
+        const first = mcpPath.split("/")[1];
+        const shellAppDir = routerDir(z.dir, "app");
+        if (shellAppDir && fs.existsSync(path.join(shellAppDir, first)) && !first.startsWith("_")) fail(z.name, `its MCP server's path ${mcpPath} is under its own app/${first}`, "give Mcp({ path }) a segment no route serves");
+        if (zones.some((o) => o !== z && o.mount === `/${first}`)) fail(z.name, `its MCP server's path ${mcpPath} is under zone ${zones.find((o) => o.mount === `/${first}`).name}'s mount`, "give Mcp({ path }) another segment");
+        for (const a of z.mcp.auth ?? []) {
+          if (a.scheme === "bearer" && a.env && !process.env[a.env] && !a.tokens.length && !a.verify) warn(z.name, `its MCP server's Bearer({ env: "${a.env}" }): ${a.env} is not set here`, `set ${a.env} where Zones runs: Zones refuses to start without it`);
+        }
+        ok(z.name, `MCP server at ${mcpPath}: ${z.mcp.tools.length} tools, ${z.mcp.auth ? z.mcp.auth.map((a) => a.scheme).join(" or ") : "the admin rule (NEXT_ZONES_ADMIN_TOKEN, else this machine only)"}`);
+      }
       continue;
     }
     if (shellConfig) {

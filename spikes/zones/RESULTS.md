@@ -1120,3 +1120,22 @@ module-code; median of 21 fresh processes, two rounds each): `src/` 10.0 and 11.
 Checked as installed: the upgrade guard installs the package from its folder (`npm install` packs it, which builds
 `dist/`) and runs every check against it: 55 of 55 on Next 16.3.8 (with names mangled and maps, the first build),
 16.4.0 and 16.3.6 (names kept, no maps).
+
+## MCP: the server's own transport against the official SDK
+
+Zones serves MCP (`zoneConfig({ mcp })`, `src/zones/mcp.cjs`) with its own Streamable HTTP transport, JSON-RPC and
+authorization, no package added. Measured 2026-10-10, Node 24.16, Apple M1, against `@modelcontextprotocol/sdk` 1.32.1
+(its `McpServer` with the stateless `StreamableHTTPServerTransport`, one server and transport per request as its
+stateless example has it), both serving one tool, `echo { text }`:
+
+- **Install:** the SDK is 26 MB in 91 packages (express, hono, ajv, zod and their own). next-zones' three files are
+  52 KB of source.
+- **Load** (`require` of the server modules in a fresh process, median of 5): next-zones 3.5 ms and +3.1 MB RSS; the
+  SDK 78 ms and +37 MB RSS.
+- **A call** (`tools/call`, 3000 sequential over a kept-alive connection after 300 warm-up, two rounds): p50 0.078 and
+  0.085 ms against 0.193 and 0.216 ms; p99 0.17 and 0.34 ms against 1.15 and 1.08 ms.
+
+The bench: `node tools/bench/mcp.mjs own`, and `node tools/bench/mcp.mjs sdk <folder>` with the SDK and zod installed in
+that folder; the client is a plain `http.request` posting the same JSON-RPC message. What the SDK has that next-zones' server does not: server-initiated streams
+(sampling, elicitation, notifications over SSE) and sessions. Zones' tools need neither; when one does, the transport
+grows a GET stream, measured the same way.

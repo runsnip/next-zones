@@ -14,7 +14,8 @@ const config = (zone, extra = "{}") => `import { zoneConfig } from "@runsnip/nex
 const page = "export default function Page() { return null; }\n";
 
 write("shell/package.json", `{ "name": "doctor-shell", "dependencies": { "dup-pkg": "1" } }`);
-write("shell/next.config.mjs", config({ mount: "/", endpoints: { base: "/ops", events: true } }, `{ env: { LABEL: "shell" }, output: "export" }`));
+write("shell/mcp.mjs", `import { Mcp, Tools, Metrics, Bearer } from "@runsnip/next-zones/mcp";\nexport const mcp = Mcp({ path: "/pz/mcp", tools: Tools(Metrics()), auth: [Bearer({ env: "DOCTOR_UNSET_TOKEN" })] });\n`);
+write("shell/next.config.mjs", `import { zoneConfig } from "@runsnip/next-zones/config";\nimport { mcp } from "./mcp.mjs";\nexport default zoneConfig({ mount: "/", endpoints: { base: "/ops", events: true }, mcp }, { env: { LABEL: "shell" }, output: "export" });\n`);
 write("shell/pages/pz.tsx", page);
 write("shell/public/pz/logo.svg", "<svg/>");
 write("node_modules/dup-pkg/package.json", `{ "name": "dup-pkg", "version": "1.0.0" }`);
@@ -114,6 +115,9 @@ const expected = {
   pagesUpdates: /! bad: its Pages Router pages do not render <ZoneUpdates \/>/,
   shellClient: /! shell: does not import @runsnip\/next-zones\/client/,
   shellEvents: /! shell: declares the events endpoint but renders no <ZoneUpdates \/>/,
+  mcpMetrics: /✗ shell: its MCP server has Metrics\(\) but metrics are off/,
+  mcpPath: /✗ shell: its MCP server's path \/pz\/mcp is under zone pz's mount/,
+  mcpEnv: /! shell: its MCP server's Bearer\(\{ env: "DOCTOR_UNSET_TOKEN" \}\): DOCTOR_UNSET_TOKEN is not set here/,
 };
 const text = lines.join("\n");
 const wrong = {};
