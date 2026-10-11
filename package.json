@@ -1,7 +1,7 @@
 {
   "name": "@runsnip/next-zones",
   "version": "0.1.0",
-  "description": "Zones for Next.js: separately versioned apps composed into one Next app \u2014 one process, soft navigation across zones \u2014 and new zones loaded into a running server without a restart.",
+  "description": "Zones for Next.js: separately versioned apps composed into one Next app — one process, soft navigation across zones — and new zones loaded into a running server without a restart.",
   "license": "Apache-2.0",
   "author": {
     "name": "Nguyễn Văn Cảnh",
@@ -36,6 +36,32 @@
     "skills"
   ],
   "type": "module",
+  "types": "./dist/config.d.mts",
+  "typesVersions": {
+    "*": {
+      "config": [
+        "./dist/config.d.mts"
+      ],
+      "client": [
+        "./dist/client.d.mts"
+      ],
+      "zones": [
+        "./dist/zones/index.d.cts"
+      ],
+      "build": [
+        "./dist/build.d.mts"
+      ],
+      "metrics": [
+        "./dist/metrics.d.cts"
+      ],
+      "mcp": [
+        "./dist/mcp.d.cts"
+      ],
+      "sources": [
+        "./dist/sources.d.cts"
+      ]
+    }
+  },
   "exports": {
     "./config": {
       "types": "./dist/config.d.mts",
