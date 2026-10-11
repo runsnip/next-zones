@@ -31,6 +31,7 @@
     "tsconfig",
     "LICENSE",
     "NOTICE",
+    "CHANGELOG.md",
     "llms.txt",
     "llms-full.txt",
     "skills"

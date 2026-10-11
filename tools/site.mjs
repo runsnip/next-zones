@@ -185,6 +185,7 @@ pre { background: var(--code); border: 1px solid var(--line); border-radius: 10p
 .top nav a:hover, .top nav a[aria-current] { color: var(--fg); text-decoration: none; }
 .wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px; }
 .docs { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 40px; padding-block: 28px 64px; }
+.docs.changelog { grid-template-columns: minmax(0, 1fr); max-width: 860px; }
 .side { position: sticky; top: 76px; align-self: start; max-height: calc(100vh - 92px); overflow-y: auto; font-size: 14px; }
 .side ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .side a { display: block; padding: 5px 10px; border-radius: 7px; color: var(--muted); }
@@ -286,6 +287,7 @@ ${FONTS}
   <nav aria-label="Site">
     <a href="${base}docs/index.html"${current === "docs" ? ' aria-current="page"' : ""}>Docs</a>
     <a class="narrow" href="${base}docs/getting-started.html">Get started</a>
+    <a class="wide" href="${base}changelog.html"${current === "changelog" ? ' aria-current="page"' : ""}>Changelog</a>
     <a class="wide" href="${base}llms.txt">llms.txt</a>
     <a href="${REPO}" rel="noopener">GitHub</a>
     <a class="wide" href="${NPM}" rel="noopener">npm</a>
@@ -296,6 +298,7 @@ ${body}
   <span>next-zones · Apache-2.0 · by <a href="https://runsnip.com" rel="noopener">RunSnip</a></span>
   <a href="${REPO}" rel="noopener">GitHub</a>
   <a href="${NPM}" rel="noopener">npm</a>
+  <a href="${base}changelog.html">Changelog</a>
   <a href="${base}llms.txt">llms.txt</a>
   <a href="${base}llms-full.txt">llms-full.txt</a>
 </div></footer>
@@ -324,6 +327,14 @@ function docPage(page, index, all) {
     html: layout({ title: `${page.name === "README" ? "Documentation" : heading.replace(/`/g, "")} · next-zones`, description: firstParagraph.slice(0, 200), canonical: `/docs/${htmlName}`, body, base: "../", current: "docs", markdown: `${RAW}/docs/${file}` }),
     htmlName,
   };
+}
+
+/* CHANGELOG.md, as one page at the root. */
+function changelog() {
+  const source = fs.readFileSync(path.join(root, "CHANGELOG.md"), "utf8");
+  const html = renderer().render(source).replace(/<(h[23]) id="([^"]+)">([\s\S]*?)<\/\1>/g, '<$1 id="$2">$3<a class="anchor" href="#$2" aria-label="Link to this section">#</a></$1>');
+  const body = `<div class="wrap docs changelog"><article>${html}<p class="edit"><a href="${REPO}/blob/main/CHANGELOG.md" rel="noopener">Edit this page on GitHub</a> · <a href="${RAW}/CHANGELOG.md" rel="noopener">Markdown</a></p></article></div>`;
+  return layout({ title: "Changelog · next-zones", description: "What changed in each version of @runsnip/next-zones on npm.", canonical: "/changelog.html", body, base: "", current: "changelog", markdown: `${RAW}/CHANGELOG.md` });
 }
 
 function home() {
@@ -409,6 +420,7 @@ export function buildSite() {
     written.push(`/docs/${p.htmlName}`);
   });
   fs.writeFileSync(path.join(out, "index.html"), home());
+  fs.writeFileSync(path.join(out, "changelog.html"), changelog());
   fs.writeFileSync(path.join(out, "site.css"), CSS.trim() + "\n");
   fs.writeFileSync(path.join(out, "site.js"), SITE_JS);
   fs.copyFileSync(path.join(root, "llms.txt"), path.join(out, "llms.txt"));
@@ -416,7 +428,7 @@ export function buildSite() {
   fs.copyFileSync(path.join(root, "docs", "og.png"), path.join(out, "og.png"));
   for (const [from, to] of [["favicon.ico", "favicon.ico"], ["icon.png", "icon.png"], ["apple-icon.png", "apple-touch-icon.png"]]) fs.copyFileSync(path.join(ICONS, from), path.join(out, to));
   fs.writeFileSync(path.join(out, "robots.txt"), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
-  const urls = ["/", ...written, "/llms.txt", "/llms-full.txt"];
+  const urls = ["/", ...written, "/changelog.html", "/llms.txt", "/llms-full.txt"];
   fs.writeFileSync(path.join(out, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}${u}</loc></url>`).join("\n")}\n</urlset>\n`);
   return { pages: all.length, files: fs.readdirSync(out, { recursive: true, withFileTypes: true }).filter((e) => e.isFile()).length };
 }
