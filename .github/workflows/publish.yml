@@ -30,6 +30,4 @@ jobs:
           fi
       - run: npm ci
       - run: npm test
-      # dist/ exists before npm reads package.json: without it npm drops the bin (dist/cli.mjs) as invalid.
-      - run: npm run build
       - run: npm publish
