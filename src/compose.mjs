@@ -420,6 +420,7 @@ export default (phase) => mergeConfigs(${JSON.stringify({
       aliases: scoped.get(z.name),
     })),
     loader: fileURLToPath(new URL("./compose-alias-loader.cjs", import.meta.url)),
+    out,
   })}, phase);
 `);
   return { out, shell, zones, trees, pagesFollowed };

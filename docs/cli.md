@@ -199,7 +199,8 @@ It composes the shell and every zone into one Next app, `<zones dir>/.zones-dev/
   not follow a linked page), and one `_app` and `_document`: a zone's own when only one has them, else composed ones
   that render each page with its own zone's, picked by mount (see [Zones on the Pages Router](pages-router.md)).
 - `next.config.mjs`: the shell's config, with each zone's `transpilePackages`, `env`, `headers`, `redirects` and
-  `rewrites` added, and the zones' aliases as rewrites.
+  `rewrites` added, and the zones' aliases as rewrites. Each zone's `turbopack.resolveAlias` is added too, a relative
+  target (`./`, `../`) read from the zone's folder as when it runs alone; one alias with two targets is refused.
 - `postcss.config.mjs`: the shell's, with Tailwind scanning the zones dir.
 - `tsconfig.json`: the shell's, with the `paths` every zone agrees on.
 - **Each zone keeps its own path aliases.** Next reads one tsconfig per app, so an alias that zones point to different
