@@ -1139,3 +1139,46 @@ The bench: `node tools/bench/mcp.mjs own`, and `node tools/bench/mcp.mjs sdk <fo
 that folder; the client is a plain `http.request` posting the same JSON-RPC message. What the SDK has that next-zones' server does not: server-initiated streams
 (sampling, elicitation, notifications over SSE) and sessions. Zones' tools need neither; when one does, the transport
 grows a GET stream, measured the same way.
+
+## Chunks written again, named so everywhere (async loaders, the runtime's registration)
+
+**Found** on a real app served by Zones in a production-like stack: clicking a file in its editor failed with
+"Module 843476 was instantiated because it was required from module 264047, but the module factory is not available".
+
+**Cause.** When Zones writes a zone's chunk again (`…-z<build>.js`, module ids remapped or aliased to the shell's),
+the client manifests and seeded payloads named the new file, but nothing inside the chunks did:
+- An async loader (what a dynamic `import()` compiles to) is a module of the importing chunk:
+  `e.v(t=>Promise.all(["static/chunks/a.js"].map(t=>e.l(t))).then(()=>t(264047)))`. Its list kept the old name, so
+  the browser loaded the old file, whose modules require React's runtime under the zone's own id (843476), while the
+  zone's chunks written again register it under the shell's (43476).
+- The loader's `t(264047)` was not seen as a require (`t` is the import function the runtime hands the loader:
+  `e.A(id)` is `this.r(id)(esmImport)`), so a remapped target would not have been remapped either.
+- The zone's runtime chunk, loaded by its own documents (its prerendered pages keep their build's root main files),
+  registers itself with `{otherChunks, runtimeModuleIds}`, with old names and ids: on such a page (the test zone
+  `wide`, aliased ids) the runtime waited for chunks no script registers, and the page never hydrated. `widths.mjs`
+  read only server-rendered text, so it passed.
+- A loader's chunk names were part of its identity, and so of its importers' (Merkle): two builds' loaders of one
+  module differed. In a second real zone, an icon component importing through such a loader, with a module-level
+  `new Map()` cache, was reported at every boot as a duplicated stateful module.
+
+**Fix** (`module-code.cjs`, `zone-client.cjs`, analysis format m5):
+- A loader's import is a require (`method: "import"`): followed by identity, spread to importers, remapped in place.
+- Every chunk path a module names is recorded with its position. A JS chunk path is left out of the canonical form
+  (it names how a build split its files; the module the loader gives counts, by identity); a CSS one is kept.
+- The chunks written again are closed under "names a chunk written again", and each chunk path is rewritten in place.
+- The runtime chunk is written again when its registration names a chunk written again or a remapped id.
+  From Next 16.4 the registration is inline in the page instead (`TURBOPACK.push({"otherChunks":[…],
+  "runtimeModuleIds":[…]})`): `payload.cjs` names it again in the zone's seeded pages (found by the upgrade guard on
+  16.4.0, where `asyncchunks.mjs` failed on a direct load until then).
+- A route's `react-loadable-manifest.json` names the new chunks (Zones and `link-app`).
+- `link.mjs` and `link-app.mjs` wrote the zone's main chunk from `mainItems`, which `zone-client.cjs` no longer
+  returned (`mainSource` since the Next 16.4 work): they write `mainSource`.
+
+**Measured** (the analysis run on the two real zones' builds, against their shell; machine under load, so times are not
+compared): before, the first zone's 29 chunks written again held 4 old chunk names (in one chunk), the second's 14
+held 2, and the second reported 1 stateful conflict. After: 0 old names, 0 stateful conflicts; 30 and 15 chunks
+written again (the runtime chunk each), the same 300 and 298 remapped ids.
+
+**Check:** `asyncchunks.mjs`. The `wide` zone's page has a button whose `import()` loads a card (JSX, the shell's
+context): the card renders with "context root" after a soft navigation and on a direct load, with no page error, and
+no chunk is fetched under its old name once it has a new one. On the previous code it fails with the error above.

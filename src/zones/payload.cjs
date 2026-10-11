@@ -140,9 +140,25 @@ function payloadTransform({ buildId, shellBuildId, mainChunks = [], idMap = {}, 
   const I = 0x49, BRACKET = 0x5b;
   const edit = { editLine, editText: plain, needles: [buildId, ...urls.map(([from]) => from)], always: (tag, next) => (mainChunks.length > 0 || remapped) && tag === I && next === BRACKET };
   const flight = (stream) => applyEdits([stream], flightEdits(stream, edit))[0];
+  /* The runtime's registration, inline in the page from Next 16.4 (in the runtime chunk before):
+     `TURBOPACK.push({"otherChunks":["static/chunks/a.js",…],"runtimeModuleIds":[123]})`. Its chunk paths (relative to
+     /_next/) and ids are named again as the zone's chunks were written (zone-client.cjs), or the runtime waits for
+     chunks no script registers and the page never hydrates. */
+  const relative = new Map(urls.filter(([from]) => from.startsWith("/_next/")).map(([from, to]) => [from.slice("/_next/".length), to.slice("/_next/".length)]));
+  const registration = (text) => text.replace(/\{"otherChunks":\[([^\]]*)\],"runtimeModuleIds":\[([^\]]*)\]\}/g, (all, chunks, ids) => {
+    const nextChunks = chunks.replace(/"((?:[^"\\]|\\.)*)"/g, (q, value) => (relative.has(value) ? JSON.stringify(relative.get(value)) : q));
+    const nextIds = ids.replace(/\d+/g, (id) => (idMap[id] !== undefined ? String(idMap[id]) : id));
+    return `{"otherChunks":[${nextChunks}],"runtimeModuleIds":[${nextIds}]}`;
+  });
+  const REGISTRATION = Buffer.from(`"otherChunks"`, "utf8");
   /* The page outside its flight data: decoded only when something in it changes. */
   const needleBytes = [buildId, ...urls.map(([from]) => from)].filter(Boolean).map((n) => Buffer.from(n, "utf8"));
-  const plainBytes = (bytes) => (needleBytes.some((n) => bytes.indexOf(n) >= 0) ? Buffer.from(plain(bytes.toString("utf8")), "utf8") : bytes);
+  const plainBytes = (bytes) => {
+    const reg = (relative.size || remapped) && bytes.indexOf(REGISTRATION) >= 0;
+    if (!reg && !needleBytes.some((n) => bytes.indexOf(n) >= 0)) return bytes;
+    const text = plain(bytes.toString("utf8"));
+    return Buffer.from(reg ? registration(text) : text, "utf8");
+  };
   const html = (page) => {
     const found = inlineChunks(page);
     const chunks = found.map((f) => f.bytes);

@@ -86,3 +86,10 @@ test("nothing to change: the same bytes", () => {
   assert.ok(t(flight, "flight").equals(flight));
   assert.ok(t(html, "html").equals(html));
 });
+
+test("the runtime's inline registration (Next 16.4) names the chunks written again and the remapped ids", () => {
+  const t = payloadTransform({ buildId: "zone_build_id", shellBuildId: "shell_build_id", idMap: { 494553: 94553 },
+    chunkUrls: { "/_next/static/chunks/a.js": "/_next/static/chunks/a-z1.js" } });
+  const html = Buffer.from(`<script src="/_next/static/chunks/a.js" async=""></script><script>(self["TURBOPACK"] || (self["TURBOPACK"] = [])).push({"otherChunks":["static/chunks/a.js","static/chunks/b.js"],"runtimeModuleIds":[494553,7]});</script>`);
+  assert.equal(t(html, "html").toString(), `<script src="/_next/static/chunks/a-z1.js" async=""></script><script>(self["TURBOPACK"] || (self["TURBOPACK"] = [])).push({"otherChunks":["static/chunks/a-z1.js","static/chunks/b.js"],"runtimeModuleIds":[94553,7]});</script>`);
+});

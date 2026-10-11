@@ -66,9 +66,9 @@ Each spike ends with its numbers and a verdict: it works, or exactly where in Ne
     install.
 - **Instrumentation.** The shell's covers every zone, and each zone's own covers its routes, under a policy.
 - **Tests.**
-  - `npm test`: 49 unit tests of the pure parts (module identity, `zoneConfig`, declarations, build digests, the
+  - `npm test`: 96 unit tests of the pure parts (module identity, `zoneConfig`, declarations, build digests, the
     Next contract, the composer's alias loader, zone image packing), under a second.
-  - `npm run test:zones`: the 45 browser and HTTP checks of `spikes/zones`, each on a fresh Zones service. The builds must exist
+  - `npm run test:zones`: the 59 browser and HTTP checks of `spikes/zones`, each on a fresh Zones service. The builds must exist
     (`spikes/zones/build-zone.sh`).
   - `npm run test:upgrade <next version>`: all of it on another Next, installed from scratch (the upgrade guard).
 
