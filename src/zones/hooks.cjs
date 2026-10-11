@@ -112,7 +112,9 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
               if (!args.manifest.startsWith(`server/app${page}`)) continue;
               remember(path.join(z.dist, args.manifest));
               const value = load({ ...args, projectDir: z.dist, distDir: "." });
-              return args.manifest.endsWith("_client-reference-manifest.js") ? manifests.withZoneMainChunks(value, z) : value;
+              if (args.manifest.endsWith("_client-reference-manifest.js")) return manifests.withZoneMainChunks(value, z);
+              if (args.manifest.endsWith("react-loadable-manifest.json")) return manifests.withZoneLoadable(value, z);
+              return value;
             }
           }
         }

@@ -14,6 +14,13 @@
  *   it), a one-letter method, a numeric id: `e.i(123)`. Each with the id literal's position, for remapping. In the
  *   canonical form the id is blanked: a dependency counts by what it is (zone-client.cjs hashes it in).
  * - runtimeMethods: the names the module uses on its context (`e.i(…)`, `e.g`, …), checked against the shell's runtime.
+ * - An async loader (what a dynamic `import()` compiles to): `e.v(t=>Promise.all(["static/chunks/a.js"].map(t=>e.l(t)))
+ *   .then(()=>t(123)))`. The runtime calls the function it exports with its import function (`e.A(id)` is
+ *   `this.r(id)(esmImport)`), so `t(123)` is a require of the module the import gives: it is found and remapped as one.
+ * - chunks: the client chunk paths the module names (`"static/chunks/a.js"`, a loader's list), with their positions, so
+ *   a chunk written again under a new name is named so in every module that loads it. In the canonical form a JS
+ *   chunk's path is left out: it names how the build split its files, not what the module is (the module a loader
+ *   gives counts, as a require). A CSS chunk's path is kept: it is the style the loader brings.
  *
  * This replaces a tokenizer over minified text (debt D15): there, a short name was renamed by first appearance
  * whatever it was bound to, a long local kept its name, and `x.y(1)` on any one-letter object counted as a require.
@@ -22,6 +29,10 @@
 let acorn = null;
 /** The parser: Next's compiled acorn, resolved from the shell (next-contract.cjs checks it is there). */
 function useParser(parser) { acorn = parser; }
+
+/* A client chunk's path, as Turbopack names one in a module (relative to /_next/). */
+const CHUNK_PATH = /^static\/chunks\/[^"'\\\s]+\.(js|css)$/;
+const isJsChunk = (node) => node?.type === "Literal" && typeof node.value === "string" && CHUNK_PATH.test(node.value) && node.value.endsWith(".js");
 
 const FUNCTION = new Set(["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"]);
 const SKIP_KEYS = new Set(["type", "start", "end", "loc", "range", "raw", "sourceType", "extra"]);
@@ -52,9 +63,19 @@ class Scope {
 function readModule(source, { strict: inStrictScope = false } = {}) {
   if (!acorn) throw new Error("next-zones: module-code.cjs has no parser (useParser)");
   const ast = acorn.parseExpressionAt(source, 0, { ecmaVersion: "latest", sourceType: "script", allowHashBang: false });
-  const requires = [], runtimeMethods = new Set();
+  const requires = [], runtimeMethods = new Set(), chunks = [];
+  /* An async loader's function, and the binding of its parameter (the import function the runtime hands it). */
+  const loaderFunctions = new Set(), importers = new Set();
   let counter = 0;
   const bind = (scope, id) => { if (!scope.names.has(id.name)) scope.names.set(id.name, `$${counter++}`); };
+  /* The factory's body is one statement, this call (`e=>{e.v(…)}`, or an arrow's expression body). */
+  const isLoaderShape = (call) => {
+    const body = /Function/.test(ast.type) ? ast.body : null;
+    if (!body) return false;
+    if (body === call) return true;
+    const statements = body.type === "BlockStatement" ? body.body.filter((st) => !st.directive) : [];
+    return statements.length === 1 && statements[0].type === "ExpressionStatement" && statements[0].expression === call;
+  };
   /* A binding the parser cannot pin down (with, direct eval): names are kept as written. */
   let dynamic = false;
 
@@ -103,6 +124,7 @@ function readModule(source, { strict: inStrictScope = false } = {}) {
     const body = simple ? scope : new Scope(scope, true);
     if (fn.body.type === "BlockStatement") { hoistVars(fn.body, body, bodyStrict); hoistLexical(fn.body.body, body); }
     if (context === null && fn.params[0]?.type === "Identifier") context = scope.names.get(fn.params[0].name);
+    if (loaderFunctions.has(fn) && fn.params[0]?.type === "Identifier") importers.add(scope.names.get(fn.params[0].name));
     emit(`${fn.type}(${fn.async ? "a" : ""}${fn.generator ? "g" : ""}`);
     if (fn.type === "FunctionExpression" && fn.id) walk(fn.id, outer, bodyStrict);
     for (const p of fn.params) walk(p, scope, bodyStrict);
@@ -132,6 +154,10 @@ function readModule(source, { strict: inStrictScope = false } = {}) {
         return emit(`#@${node.name}`);
       }
       case "Literal":
+        if (typeof node.value === "string" && CHUNK_PATH.test(node.value)) {
+          chunks.push({ path: node.value, start: node.start, end: node.end });
+          if (isJsChunk(node)) return emit("Lchunk");
+        }
         if (node.regex) return emit(`R${JSON.stringify([node.regex.pattern, node.regex.flags])}`);
         if (node.bigint !== undefined) return emit(`B${node.bigint}`);
         return emit(`L${typeof node.value}:${JSON.stringify(node.value)}`);
@@ -194,13 +220,30 @@ function readModule(source, { strict: inStrictScope = false } = {}) {
         if (node.computed || node.property.type === "PrivateIdentifier") walk(node.property, scope, strict); else emit(`P${node.property.name}`);
         return;
       }
+      case "ArrayExpression": {
+        /* A list of chunks to load: its JS chunks' paths are not what the module is (see above), nor their number. */
+        if (!node.elements.some(isJsChunk)) break;
+        emit("ArrayExpression[");
+        for (const el of node.elements) { if (isJsChunk(el)) chunks.push({ path: el.value, start: el.start, end: el.end }); else walk(el, scope, strict); }
+        return emit("+chunks]");
+      }
       case "CallExpression": {
         const callee = node.callee;
         if (callee.type === "Identifier" && callee.name === "eval" && !scope.lookup("eval")) dynamic = true;
+        /* An async loader's import: `t(123)`, t the parameter of the function the loader exports. */
+        if (callee.type === "Identifier" && importers.size && importers.has(scope.lookup(callee.name))) {
+          const arg = node.arguments[0];
+          if (arg?.type === "Literal" && typeof arg.value === "number" && Number.isInteger(arg.value)) {
+            requires.push({ id: String(arg.value), method: "import", start: arg.start, end: arg.end });
+            emit("require.import("); for (const a of node.arguments.slice(1)) walk(a, scope, strict); return emit(")");
+          }
+        }
         if (callee.type === "MemberExpression" && !callee.computed && callee.object.type === "Identifier" && context !== null && scope.lookup(callee.object.name) === context) {
           const method = callee.property.name;
           runtimeMethods.add(method);
           const arg = node.arguments[0];
+          /* An async loader: the factory's one statement exports a function of one parameter (see above). */
+          if (method === "v" && FUNCTION.has(arg?.type) && arg.params.length === 1 && isLoaderShape(node)) loaderFunctions.add(arg);
           if (method.length === 1 && arg?.type === "Literal" && typeof arg.value === "number" && Number.isInteger(arg.value)) {
             requires.push({ id: String(arg.value), method, start: arg.start, end: arg.end });
             emit(`require.${method}(`); for (const a of node.arguments.slice(1)) walk(a, scope, strict); return emit(")");
@@ -257,9 +300,20 @@ function readModule(source, { strict: inStrictScope = false } = {}) {
   const top = new Scope(null, true);
   walk(ast, top, factoryStrict);
   /* Read again keeping every name: the dynamic case is only known once read. */
-  if (dynamic) { out.length = 0; counter = 0; context = null; requires.length = 0; runtimeMethods.clear(); privates.length = 0; walk(ast, new Scope(null, true), factoryStrict); }
+  if (dynamic) { out.length = 0; counter = 0; context = null; requires.length = 0; runtimeMethods.clear(); chunks.length = 0; importers.clear(); privates.length = 0; walk(ast, new Scope(null, true), factoryStrict); }
   /* Joined by newlines, which no token holds (strings are JSON): the form reads back one way only. */
-  return { canonical: `${factoryStrict ? "strict" : "sloppy"}\n${out.join("\n")}`, requires, runtimeMethods };
+  return { canonical: `${factoryStrict ? "strict" : "sloppy"}\n${out.join("\n")}`, requires, runtimeMethods, chunks };
+}
+
+/** The source with each required id replaced through `idMap` (id → new id), and each chunk path through `chunkMap`
+    (path → new path), by the positions readModule found. */
+function remapModule(source, { requires, chunks = [] }, idMap, chunkMap = {}) {
+  const edits = [];
+  for (const r of requires) if (idMap[r.id] !== undefined) edits.push({ start: r.start, end: r.end, text: String(idMap[r.id]) });
+  for (const c of chunks) if (chunkMap[c.path] !== undefined) edits.push({ start: c.start, end: c.end, text: JSON.stringify(chunkMap[c.path]) });
+  let out = "", at = 0;
+  for (const e of edits.sort((a, b) => a.start - b.start)) { out += source.slice(at, e.start) + e.text; at = e.end; }
+  return out + source.slice(at);
 }
 
 /** The source with each required id replaced through `idMap` (id → new id), by the positions readModule found. */
@@ -355,4 +409,4 @@ function holdsState(source) {
   return reassigned ? excerpt(reassigned) : null;
 }
 
-module.exports = { useParser, readModule, remapRequires, holdsState };
+module.exports = { useParser, readModule, remapRequires, remapModule, holdsState };

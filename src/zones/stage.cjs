@@ -180,7 +180,7 @@ function createStaging(ctx) {
     await fs.promises.rename(temp, file);
   }
 
-  const ANALYSIS = "m14";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
+  const ANALYSIS = "m15";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
   async function analyseZoneClient(staged) {
     /* A zone without App Router pages has no client code that runs in the shell's document: its Pages Router pages
        load in documents of their own, with the zone's own runtime and chunks, as built. */

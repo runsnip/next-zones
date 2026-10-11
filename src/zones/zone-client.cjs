@@ -11,7 +11,9 @@
  * 2. A module that requires a conflicting one is rewritten too, so it conflicts as well when the browser may hold its
  *    id: conflicts spread to their importers.
  * 3. Conflicting modules get new ids (derived from the zone build and the old id); every chunk of the zone is written
- *    again with them, under a new URL (the old one may be cached).
+ *    again with them, under a new URL (the old one may be cached). A chunk written again is named by its new URL
+ *    everywhere: in the client manifests and payloads (stage.cjs) and in the chunks themselves (an async loader's list
+ *    of chunks to load), so a chunk naming one written again is written again too, until none is left.
  * 4. The modules the zone's root main chunks hold and the shell's lack (with what they require) go into one chunk of
  *    their own: a zone reached softly runs in the shell's document, which never loads the zone's main chunks.
  * 5. The Turbopack runtime methods the zone's code calls must exist in the shell's runtime.
@@ -26,12 +28,12 @@ const crypto = require("node:crypto");
 const { dist, shellDist, known: knownIn, outDir, buildKey, urlPrefix, readCache } = workerData;
 const isRuntime = (f) => /(^|[\\/])turbopack-[^/]*\.js$/.test(f);
 const { createRequire } = require("node:module");
-const { useParser, readModule, remapRequires, holdsState } = require("./module-code.cjs");
+const { useParser, readModule, remapModule, holdsState } = require("./module-code.cjs");
 /* Every module factory is read with a parser (module-code.cjs): Next's own acorn, from the shell. */
 useParser(createRequire(path.join(shellDist, "..", "package.json"))("next/dist/compiled/acorn"));
 const sha = (text) => crypto.createHash("sha1").update(text).digest("base64");
 /* The analysis format, part of the cache key: hashes of another format are not comparable. */
-const FORMAT = "m4";
+const FORMAT = "m5";
 /* What a group's factory is (module-code.cjs): its canonical code's hash, the ids it requires (where), the runtime
    methods it calls. Kept on disk by the factory's text (readCache), so a module two builds share, byte for byte (most
    of a zone's next version), is parsed once: parsing is most of the analysis's time. */
@@ -43,12 +45,12 @@ const read = (g) => {
   /* A factory made in a strict scope is strict without its directive: part of what it is (module-code.cjs). */
   const key = sha(`${g.strict ? "s" : ""}:${g.source}`);
   let r = reads.get(key);
-  if (!r && cached[key]) r = { code: cached[key].c, requires: cached[key].r, runtimeMethods: new Set(cached[key].m) };
+  if (!r && cached[key]) r = { code: cached[key].c, requires: cached[key].r, runtimeMethods: new Set(cached[key].m), chunks: cached[key].k ?? [] };
   if (!r) {
     let m;
     try { m = readModule(g.source, { strict: Boolean(g.strict) }); }
     catch (error) { throw new Error(`next-zones: a client module (${g.ids.join(", ")}) could not be parsed: ${error.message}`); }
-    r = { code: sha(m.canonical), requires: m.requires, runtimeMethods: m.runtimeMethods };
+    r = { code: sha(m.canonical), requires: m.requires, runtimeMethods: m.runtimeMethods, chunks: m.chunks };
   }
   reads.set(key, r);
   return (g.read = r);
@@ -57,7 +59,7 @@ const read = (g) => {
 function saveReads() {
   if (!readCache) return;
   const all = { ...cached };
-  for (const [key, r] of reads) all[key] = { c: r.code, r: r.requires, m: [...r.runtimeMethods] };
+  for (const [key, r] of reads) all[key] = { c: r.code, r: r.requires, m: [...r.runtimeMethods], k: r.chunks };
   const keys = Object.keys(all);
   const keep = keys.length > 100_000 ? Object.fromEntries([...reads.keys()].map((k) => [k, all[k]])) : all;
   fs.mkdirSync(path.dirname(readCache), { recursive: true });
@@ -162,6 +164,8 @@ const chunksOf = (root) => {
   return fs.readdirSync(path.join(root, "static", "chunks")).filter((f) => f.endsWith(".js") && !isRuntime(f) && !skip.has(f));
 };
 
+function zoneBuildManifest() { return JSON.parse(fs.readFileSync(path.join(dist, "build-manifest.json"), "utf8")); }
+
 /* What the browser may hold: the shell's modules, and what earlier installs reported. */
 const known = new Map(Object.entries(knownIn ?? {}).map(([id, hashes]) => [id, new Set(hashes)]));
 let shellModules = null;
@@ -258,22 +262,91 @@ const chunkSource = (groups, sourceOf) => {
   if (!loose.length) return `(()=>{"use strict";${PUSH(strict)}})();\n`;
   return `${PUSH((strict.length ? [`(()=>{"use strict";return[${strict.join(",")}]})()`] : []).concat(loose))}\n`;
 };
-/* Each required id rewritten where the parse found it: the original ids stay what the analysis below follows. */
-const remapSource = (g) => remapRequires(g.source, read(g).requires, idMap);
+/* The chunks written again: those holding a remapped module or a require of one, then, until none is added, those
+   naming a chunk written again (an async loader's list): the browser must never load a chunk under its old name once
+   it has a new one, since the old file still registers the old ids (a module aliased to the shell's id is not
+   registered under the zone's own id by anything else: "module factory is not available"). */
+const renamedOf = (file) => file.replace(/\.js$/, `-z${buildKey.slice(0, 8)}.js`);
 if (Object.keys(idMap).length) {
+  const touched = (c) => c.groups.some((g) => g.ids.some((id) => idMap[id] !== undefined) || requiredBy(g).some((d) => idMap[d] !== undefined));
+  for (const c of chunks) if (touched(c)) chunkMap[`static/chunks/${c.file}`] = `static/chunks/${renamedOf(c.file)}`;
+  for (let added = true; added;) {
+    added = false;
+    for (const c of chunks) {
+      if (chunkMap[`static/chunks/${c.file}`]) continue;
+      if (!c.groups.some((g) => read(g).chunks.some((k) => chunkMap[k.path]))) continue;
+      chunkMap[`static/chunks/${c.file}`] = `static/chunks/${renamedOf(c.file)}`;
+      added = true;
+    }
+  }
+}
+/* Each required id and chunk path rewritten where the parse found it: the original ids stay what the analysis below
+   follows. */
+const remapSource = (g) => remapModule(g.source, read(g), idMap, chunkMap);
+if (Object.keys(chunkMap).length) {
   fs.mkdirSync(outDir, { recursive: true });
   for (const c of chunks) {
-    const touched = c.groups.some((g) => g.ids.some((id) => idMap[id] !== undefined) || requiredBy(g).some((d) => idMap[d] !== undefined));
-    if (!touched) continue;
-    const renamed = c.file.replace(/\.js$/, `-z${buildKey.slice(0, 8)}.js`);
-    writeAtomic(path.join(outDir, renamed), chunkSource(c.groups, remapSource));
-    chunkMap[`static/chunks/${c.file}`] = `static/chunks/${renamed}`;
+    const renamed = chunkMap[`static/chunks/${c.file}`];
+    if (!renamed) continue;
+    writeAtomic(path.join(outDir, path.basename(renamed)), chunkSource(c.groups, remapSource));
     for (const g of c.groups) g.output = remapSource(g);
   }
 }
 
+/* The zone's runtime chunk, which its own documents load (a prerendered page of the zone keeps its build's root main
+   files): it registers itself with the chunks to wait for and the modules to run first, `{otherChunks: [paths],
+   runtimeModuleIds: [ids]}`. Those name chunks written again and remapped ids too: written again, under a new name,
+   when they do (else the runtime waits for chunks no script registers, and the page never hydrates). */
+const parser = createRequire(path.join(shellDist, "..", "package.json"))("next/dist/compiled/acorn");
+function runtimeEdits(text) {
+  let ast;
+  try { ast = parser.parse(text, { ecmaVersion: "latest", sourceType: "script" }); } catch { return []; }
+  const keyOf = (p) => (p.type === "Property" && !p.computed ? (p.key.type === "Identifier" ? p.key.name : p.key.value) : null);
+  const edits = [];
+  const visit = (node) => {
+    if (!node || typeof node.type !== "string") return;
+    if (node.type === "ObjectExpression" && node.properties.some((p) => keyOf(p) === "otherChunks")) {
+      for (const p of node.properties) {
+        const list = p.value?.type === "ArrayExpression" ? p.value.elements : [];
+        if (keyOf(p) === "otherChunks") {
+          for (const el of list) {
+            /* A path, or { path, … }. */
+            const lit = el?.type === "Literal" ? el : el?.type === "ObjectExpression" ? el.properties.find((q) => keyOf(q) === "path")?.value : null;
+            if (lit?.type === "Literal" && typeof lit.value === "string" && chunkMap[lit.value]) edits.push({ start: lit.start, end: lit.end, text: JSON.stringify(chunkMap[lit.value]) });
+          }
+        }
+        if (keyOf(p) === "runtimeModuleIds") {
+          for (const el of list) if (el?.type === "Literal" && idMap[String(el.value)] !== undefined) edits.push({ start: el.start, end: el.end, text: JSON.stringify(idMap[String(el.value)]) });
+        }
+      }
+      return;
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "start" || key === "end") continue;
+      const v = node[key];
+      if (Array.isArray(v)) v.forEach(visit); else if (v && typeof v.type === "string") visit(v);
+    }
+  };
+  visit(ast);
+  return edits;
+}
+if (Object.keys(chunkMap).length) {
+  for (const f of (zoneBuildManifest().rootMainFiles ?? []).filter(isRuntime)) {
+    const file = path.join(dist, f);
+    if (!fs.existsSync(file)) continue;
+    const text = fs.readFileSync(file, "utf8");
+    const edits = runtimeEdits(text).sort((a, b) => a.start - b.start);
+    if (!edits.length) continue;
+    let out = "", at = 0;
+    for (const e of edits) { out += text.slice(at, e.start) + e.text; at = e.end; }
+    const renamed = renamedOf(path.basename(f));
+    writeAtomic(path.join(outDir, renamed), out + text.slice(at));
+    chunkMap[`static/chunks/${path.basename(f)}`] = `static/chunks/${renamed}`;
+  }
+}
+
 /* 4. The main chunk: the modules of the zone's root main chunks the shell's main chunks lack, and what they require. */
-const zoneBuild = JSON.parse(fs.readFileSync(path.join(dist, "build-manifest.json"), "utf8"));
+const zoneBuild = zoneBuildManifest();
 const shellBuild = JSON.parse(fs.readFileSync(path.join(shellDist, "build-manifest.json"), "utf8"));
 const shellMain = new Set();
 for (const f of shellBuild.rootMainFiles ?? []) if (!isRuntime(f)) for (const g of chunkGroups(path.join(shellDist, f))) g.ids.forEach((id) => shellMain.add(String(id)));

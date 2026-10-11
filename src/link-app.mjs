@@ -134,14 +134,14 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
     const hasAppPages = notFound === "/_not-found/page" || Object.keys(readJson(path.join(dir, "server", "app-paths-manifest.json"), {})).some(own);
     const analysis = hasAppPages
       ? await runWorker("zone-client.cjs", { dist: dir, shellDist, buildKey, outDir: chunksDir, known })
-      : { missingUsed: [], shellModules: null, zoneModules: {}, mainItems: null, chunkMap: {}, idMap: {} };
+      : { missingUsed: [], shellModules: null, zoneModules: {}, mainSource: null, chunkMap: {}, idMap: {} };
     if (analysis.missingUsed.length) throw new Error(`${zone} uses client runtime features the shell's runtime lacks (${analysis.missingUsed.join(", ")}): import @runsnip/next-zones/client in the shell (render <ZoneUpdates />), which gives its runtime every feature, and rebuild the shell`);
     known ??= Object.fromEntries(Object.entries(analysis.shellModules ?? {}).map(([id, h]) => [id, [...h]]));
     for (const [id, hashes] of Object.entries(analysis.zoneModules ?? {})) known[id] = [...new Set([...(known[id] ?? []), ...hashes])];
     const mainChunks = [];
-    if (analysis.mainItems) {
+    if (analysis.mainSource) {
       const file = `zone-${zone}-${buildKey}-main.js`;
-      fs.writeFileSync(path.join(chunksDir, file), `(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,${analysis.mainItems.join(",")}]);\n`);
+      fs.writeFileSync(path.join(chunksDir, file), analysis.mainSource);
       mainChunks.push(`/_next/static/chunks/${file}`);
     }
     const chunkUrls = Object.fromEntries(Object.entries(analysis.chunkMap).map(([from, to]) => [`/_next/${from}`, `/_next/${to}`]));
@@ -176,7 +176,13 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
         for (const file of fs.readdirSync(pageManifests)) {
           if (!file.endsWith(".json")) continue;
           fs.mkdirSync(path.join(server, "app", page), { recursive: true });
-          fs.copyFileSync(path.join(pageManifests, file), path.join(server, "app", page, file));
+          /* The chunks next/dynamic preloads, under their new URLs where a chunk was written again. */
+          if (file === "react-loadable-manifest.json" && Object.keys(chunkUrls).length) {
+            const renamed = (f) => (chunkUrls[`/_next/${f}`] ?? `/_next/${f}`).slice("/_next/".length);
+            const loadable = readJson(path.join(pageManifests, file), {});
+            for (const entry of Object.values(loadable)) if (Array.isArray(entry?.files)) entry.files = entry.files.map(renamed);
+            fs.writeFileSync(path.join(server, "app", page, file), JSON.stringify(loadable));
+          } else fs.copyFileSync(path.join(pageManifests, file), path.join(server, "app", page, file));
         }
       }
     }

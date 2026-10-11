@@ -79,7 +79,23 @@ function createManifests(ctx) {
   }
 
 
-  return { withZonePrerenders, withZoneActions, withZoneAppPaths, withZoneMainChunks };
+  /*
+   * A route's react-loadable manifest: the chunks next/dynamic preloads while rendering, under their new URLs where a
+   * chunk was written again (zone-client.cjs), as in the client reference manifest. Copied once per manifest.
+   */
+  function withZoneLoadable(value, zone) {
+    const urls = zone.chunkUrls ?? {};
+    if (!Object.keys(urls).length || !value || typeof value !== "object") return value;
+    let copy = augmented.get(value);
+    if (!copy) {
+      const renamed = (file) => (urls[`/_next/${file}`] ?? `/_next/${file}`).slice("/_next/".length);
+      copy = Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, Array.isArray(entry?.files) ? { ...entry, files: entry.files.map(renamed) } : entry]));
+      augmented.set(value, copy);
+    }
+    return copy;
+  }
+
+  return { withZonePrerenders, withZoneActions, withZoneAppPaths, withZoneMainChunks, withZoneLoadable };
 }
 
 module.exports = { createManifests };

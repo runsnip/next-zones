@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { useParser, readModule, remapRequires } = require("../src/zones/module-code.cjs");
+const { useParser, readModule, remapRequires, remapModule } = require("../src/zones/module-code.cjs");
 const ACORN = new URL("../spikes/zones/node_modules/next/dist/compiled/acorn/acorn.js", import.meta.url);
 const skip = fs.existsSync(ACORN) ? false : "needs spikes/zones installed (npm install there): the parser is Next's";
 if (!skip) useParser(require(ACORN.pathname));
@@ -98,4 +98,31 @@ test("a strict factory is one module whether its directive or its scope makes it
   const withDirective = `e=>{"use strict";var t=e.i(1);e.s(["x",0,()=>t])}`, inScope = `e=>{var t=e.i(1);e.s(["x",0,()=>t])}`;
   assert.equal(readModule(withDirective).canonical, readModule(inScope, { strict: true }).canonical);
   assert.notEqual(readModule(inScope).canonical, readModule(inScope, { strict: true }).canonical);
+});
+
+test("an async loader requires the module it imports, and names its chunks where they are", { skip }, () => {
+  /* What `import("./lazy")` compiles to (Next 16.3–16.4): the runtime's e.A(id) calls it with its import function. */
+  const loader = `e=>{e.v(t=>Promise.all(["static/chunks/2t_ujwio5dxu7.js","static/chunks/0a.css"].map(t=>e.l(t))).then(()=>t(264047)))}`;
+  const { requires, chunks } = readModule(loader);
+  assert.deepEqual(requires.map((r) => [r.method, r.id]), [["import", "264047"]], "t(264047) is the import; the inner t shadows it");
+  assert.deepEqual(chunks.map((c) => c.path), ["static/chunks/2t_ujwio5dxu7.js", "static/chunks/0a.css"]);
+  /* Remapped in place: the id and the renamed chunk; a chunk not renamed is left as it is. */
+  assert.equal(remapModule(loader, { requires, chunks }, { 264047: 100000000000007 }, { "static/chunks/2t_ujwio5dxu7.js": "static/chunks/2t_ujwio5dxu7-zabc.js" }),
+    loader.replace("2t_ujwio5dxu7.js", "2t_ujwio5dxu7-zabc.js").replace("t(264047)", "t(100000000000007)"));
+  /* An arrow factory and a strict one are loaders too. */
+  assert.deepEqual(readModule(`s=>s.v(t=>Promise.resolve().then(()=>t(5)))`).requires.map((r) => r.id), ["5"]);
+  assert.deepEqual(readModule(`e=>{"use strict";e.v(n=>Promise.all(["static/chunks/a.js"].map(t=>e.l(t))).then(()=>n(7)))}`).requires.map((r) => r.id), ["7"]);
+});
+
+test("a loader is the same module whatever its build named its JS chunks, not if it imports or styles differently", { skip }, () => {
+  const loader = (chunks, id = 1, css = []) => `s=>{s.v(t=>Promise.all([${[...chunks, ...css].map((c) => JSON.stringify(c)).join(",")}].map(t=>s.l(t))).then(()=>t(${id})))}`;
+  /* Two builds' names for the chunks, and how many there are: the module it gives counts (a require, by identity). */
+  assert.ok(same(loader(["static/chunks/0a5axu0y5es7l.js", "static/chunks/26i62d7xagoaz.js"]), loader(["static/chunks/0qcrc-ke1brs5.js"], 2)));
+  /* Its style is part of it. */
+  assert.ok(!same(loader(["static/chunks/a.js"], 1, ["static/chunks/x.css"]), loader(["static/chunks/a.js"], 1, ["static/chunks/y.css"])));
+  /* Not a loader: a function exported among other statements, or a call on a parameter of a function not exported. */
+  assert.deepEqual(readModule(`e=>{e.v(t=>t(5));e.s([])}`).requires.map((r) => r.id), []);
+  assert.deepEqual(readModule(`e=>{e.s(["f",()=>t=>t(5)])}`).requires.map((r) => r.id), []);
+  /* Any other string stays what it is. */
+  assert.ok(!same(`e=>{e.v("static/chunks/a.txt")}`, `e=>{e.v("static/chunks/b.txt")}`));
 });

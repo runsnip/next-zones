@@ -56,9 +56,9 @@ export async function linkStaticSite({ shellDir, images, site }) {
     known ??= Object.fromEntries(Object.entries(result.shellModules ?? {}).map(([id, h]) => [id, [...h]]));
     for (const [id, hashes] of Object.entries(result.zoneModules ?? {})) known[id] = [...new Set([...(known[id] ?? []), ...hashes])];
     const mainChunks = [];
-    if (result.mainItems) {
+    if (result.mainSource) {
       const file = `zone-${zone}-${buildKey}-main.js`;
-      fs.writeFileSync(path.join(chunksDir, file), `(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,${result.mainItems.join(",")}]);\n`);
+      fs.writeFileSync(path.join(chunksDir, file), result.mainSource);
       mainChunks.push(`/_next/static/chunks/${file}`);
     }
     const chunkUrls = Object.fromEntries(Object.entries(result.chunkMap).map(([from, to]) => [`/_next/${from}`, `/_next/${to}`]));
