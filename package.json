@@ -4,7 +4,7 @@
   "description": "Zones for Next.js: separately versioned apps composed into one Next app \u2014 one process, soft navigation across zones \u2014 and new zones loaded into a running server without a restart.",
   "license": "Apache-2.0",
   "author": {
-    "name": "Nguy\u1ec5n V\u0103n C\u1ea3nh",
+    "name": "Nguyễn Văn Cảnh",
     "email": "hello@canhnguyen.vn",
     "url": "https://canhnguyen.vn"
   },
