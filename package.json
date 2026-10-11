@@ -1,6 +1,6 @@
 {
   "name": "@runsnip/next-zones",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Zones for Next.js: separately versioned apps composed into one Next app — one process, soft navigation across zones — and new zones loaded into a running server without a restart.",
   "license": "Apache-2.0",
   "author": {
