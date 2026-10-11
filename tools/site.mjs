@@ -9,7 +9,7 @@
  * - docs/<page>.html for each page of docs/ (docs/index.html for docs/README.md), in the order docs/README.md lists
  *   them, each linking its markdown on GitHub (an alternate, as llmstxt.org suggests);
  * - llms.txt and llms-full.txt at the root, as the package ships them;
- * - site.css, site.js (a copy button on every code block), favicon.ico, icon.png, apple-touch-icon.png, robots.txt,
+ * - site.css, site.js (a copy button on every code block), og.png (tools/og/og.mjs), favicon.ico, icon.png, apple-touch-icon.png, robots.txt,
  *   sitemap.xml.
  * Markdown is rendered with markdown-it (chosen by benchmark against marked and micromark: the fastest, the same
  * output), headings get GitHub's anchors, so the docs' links (`zones.md#endpoints`) work as they do on GitHub.
@@ -271,7 +271,10 @@ ${markdown ? `<link rel="alternate" type="text/markdown" href="${markdown}">` : 
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:url" content="${SITE}${canonical}">
-<meta property="og:image" content="${SITE}/icon.png">
+<meta property="og:image" content="${SITE}/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Zones as blocks on one server; a new version of one coming down into its place">
 <meta name="theme-color" content="#2357d6">
 ${FONTS}
 <link rel="stylesheet" href="${base}site.css">
@@ -410,6 +413,7 @@ export function buildSite() {
   fs.writeFileSync(path.join(out, "site.js"), SITE_JS);
   fs.copyFileSync(path.join(root, "llms.txt"), path.join(out, "llms.txt"));
   fs.writeFileSync(path.join(out, "llms-full.txt"), llmsFull());
+  fs.copyFileSync(path.join(root, "tools", "og", "og.png"), path.join(out, "og.png"));
   for (const [from, to] of [["favicon.ico", "favicon.ico"], ["icon.png", "icon.png"], ["apple-icon.png", "apple-touch-icon.png"]]) fs.copyFileSync(path.join(ICONS, from), path.join(out, to));
   fs.writeFileSync(path.join(out, "robots.txt"), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
   const urls = ["/", ...written, "/llms.txt", "/llms-full.txt"];
