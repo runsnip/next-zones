@@ -12,6 +12,7 @@
  */
 const fs = require("node:fs");
 const path = require("node:path");
+const { siblingsOf, contentAddressed, DEFAULT_HASH_QUERY } = require("./send.cjs");
 
 const CONTENT_TYPES = {
   ".js": "application/javascript", ".mjs": "application/javascript", ".css": "text/css", ".json": "application/json",
@@ -54,8 +55,9 @@ function createAssets(ctx) {
     stored = { at: Date.now(), dirs };
     return dirs;
   };
-  /** The file a URL names among the zones' files, or null (the shell's own, or nothing). */
-  function zoneAsset(pathname) {
+  /** The file a URL names among the zones' files, or null (the shell's own, or nothing). `searchParams` (the URL's
+      query) makes a public file immutable when it names the file by content (the zone's hashQuery). */
+  function zoneAsset(pathname, searchParams) {
     let decoded;
     try { decoded = decodeURIComponent(pathname); } catch { return null; }
     if (decoded.startsWith("/_next/static/")) {
@@ -87,7 +89,12 @@ function createAssets(ctx) {
     zone.publicFiles ??= listFiles(zone.publicDir);
     if (!zone.publicFiles.has(decoded)) return null;
     const file = path.join(zone.publicDir, decoded);
-    return { file, contentType: contentTypeOf(file), cacheControl: "public, max-age=0" };   // Next's default for public/
+    /* Its precompressed siblings (logo.svg.br, logo.svg.gz), found in the same listing: send.cjs picks one by the
+       request's Accept-Encoding. */
+    const encodings = siblingsOf(file, (sibling) => zone.publicFiles.has(decoded + sibling.slice(file.length)));
+    /* Next's default for public/, unless the URL names the file by content (?h=<hash>): then it never changes. */
+    const cacheControl = contentAddressed(searchParams, zone.hashQuery ?? DEFAULT_HASH_QUERY) ? IMMUTABLE : "public, max-age=0";
+    return { file, contentType: contentTypeOf(file), cacheControl, encodings };
   }
   return { zoneAsset };
 }

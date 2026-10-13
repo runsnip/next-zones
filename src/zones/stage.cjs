@@ -159,6 +159,8 @@ function createStaging(ctx) {
     const cacheDir = path.join(ctx.cacheDir, name, `${key}--${shellBuildId}--${SEED_FORMAT}`);
     return {
       name, mount, aliases, rules, publicDir, version: identity.version, livePull: identity.livePull === true,
+      /* The query parameters that name a public file by content (zoneConfig({ hashQuery })): undefined, the default. */
+      hashQuery: Array.isArray(identity.hashQuery) ? identity.hashQuery : undefined,
       instrumentationFile: info.instrumentation ? path.join(serverDir, "instrumentation.js") : null,
       dist, appPaths, routes, dynamicRoutes, actions: info.actions, prerender: info.prerender, cacheDir,
       pagePaths, pageRoutes, pageSystem, dataRoutes: info.dataRoutes ?? [], buildId,

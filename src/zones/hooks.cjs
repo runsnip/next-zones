@@ -141,7 +141,8 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
       };
     } else if (mod === loaded.imageOptimizer) {
       replacement = { ...mod, async fetchInternalImage(href, ...rest) {
-        const asset = assets.zoneAsset(new URL(href, "http://x").pathname);
+        const { pathname, searchParams } = new URL(href, "http://x");
+        const asset = assets.zoneAsset(pathname, searchParams);
         if (!asset) return mod.fetchInternalImage(href, ...rest);
         const buffer = await fs.promises.readFile(asset.file);
         return { buffer, contentType: asset.contentType, cacheControl: asset.cacheControl,

@@ -12,6 +12,13 @@ export interface Zone {
   aliases?: ZoneAlias[];
   /** Whether a ping to Zones may make it pull this zone's images from its sources. Off by default. */
   livePull?: boolean;
+  /**
+   * The query parameters that name one of the zone's public files by its content: a request for it with one of them
+   * set to a hash-shaped value (hex of 8+ characters, or base64url of 16+), such as `/blog/logo.png?h=3f2a9c01d4e5b6a7`,
+   * is answered with `Cache-Control: public, max-age=31536000, immutable`; without one, `public, max-age=0` (Next's
+   * default for public/). Default `["h", "v"]`; `false` turns it off.
+   */
+  hashQuery?: string[] | false;
   /** The shell only: the URLs a Zones service serves of its own, none unless declared. */
   endpoints?: ZoneEndpoints | false;
   /**

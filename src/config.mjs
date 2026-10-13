@@ -6,6 +6,7 @@
  *     mount: "/blog",
  *     aliases: [{ source: "/post/:id", destination: "/blog/:id" }],
  *     livePull: true,                               // a ping to Zones may make it pull this zone's images (off by default)
+ *     hashQuery: ["h", "v"],                        // the default: /blog/logo.png?h=<hash> is served immutable
  *     // the shell only: endpoints, mode, metrics, mcp (Mcp(…) from @runsnip/next-zones/mcp)
  *     // …and the zone's own Next config, in the same object
  *   });
@@ -62,8 +63,16 @@ export function checkZone(zone, where = "zone") {
     if (mount !== "/") throw new Error(`${where}: mcp is the shell's to declare (mount "/"), not a zone's`);
     if (zone.mcp?.[MCP] !== "mcp") throw new Error(`${where}: mcp is made with Mcp({ tools, skills, auth }) from @runsnip/next-zones/mcp`);
   }
+  /* The query parameters that name a public file by content (/blog/logo.png?h=<hash>): such a URL is served with
+     Cache-Control: public, max-age=31536000, immutable. Default ["h", "v"]; false: none. Recorded in zone.json. */
+  let hashQuery;
+  if (zone.hashQuery !== undefined) {
+    if (zone.hashQuery === false) hashQuery = [];
+    else if (Array.isArray(zone.hashQuery) && zone.hashQuery.every((n) => typeof n === "string" && /^[A-Za-z0-9_.~-]+$/.test(n))) hashQuery = [...zone.hashQuery];
+    else throw new Error(`${where}: hashQuery must be a list of query parameter names like ["h", "v"], or false, got ${JSON.stringify(zone.hashQuery)}`);
+  }
   if (zone.output !== undefined) throw new Error(`${where}: output is Next's option, in the zone's Next config (the second argument), not in its zone declaration; the way the workspace is served is mode`);
-  return { mount, aliases, ...(zone.livePull ? { livePull: true } : {}), ...(endpoints ? { endpoints } : {}), ...(zone.mode && zone.mode !== "zones" ? { mode: zone.mode } : {}), ...(zone.metrics ? { metrics: true } : {}), ...(zone.mcp ? { mcp: zone.mcp } : {}) };
+  return { mount, aliases, ...(zone.livePull ? { livePull: true } : {}), ...(hashQuery ? { hashQuery } : {}), ...(endpoints ? { endpoints } : {}), ...(zone.mode && zone.mode !== "zones" ? { mode: zone.mode } : {}), ...(zone.metrics ? { metrics: true } : {}), ...(zone.mcp ? { mcp: zone.mcp } : {}) };
 }
 
 export const DEFAULT_ENDPOINTS_BASE = "/_next-zones";
@@ -116,7 +125,7 @@ function withAliases(config, { aliases }) {
 export const BUILD_OPTIONS = buildOptions.BUILD_OPTIONS;
 
 /* What zoneConfig reads as the zone's declaration; every other key of its options is Next's. */
-const ZONE_KEYS = ["mount", "aliases", "livePull", "endpoints", "mode", "metrics", "mcp"];
+const ZONE_KEYS = ["mount", "aliases", "livePull", "hashQuery", "endpoints", "mode", "metrics", "mcp"];
 
 /**
  * A zone's Next config with its zone declaration: zoneConfig({ mount: "/blog", ...nextConfig }), one object, the

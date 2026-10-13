@@ -3,6 +3,22 @@
 What changed in each version of `@runsnip/next-zones` on npm. The versions follow [semver](https://semver.org); before
 1.0, a minor version may change what the package does.
 
+## 0.1.2 (unreleased)
+
+### Added
+
+- **Zones: a zone's public files, precompressed.** A file with a `.br` or `.gz` sibling (`fonts/a.ttf.br`) is sent as
+  that sibling when the request's `Accept-Encoding` allows it (q-values read, brotli first on a tie), with
+  `Content-Encoding`, the original's `Content-Type`, the sibling's `Content-Length` and `Vary: Accept-Encoding`. A
+  `Range` request gets the plain file's bytes (`206`, `If-Range`, `416`). See [public files](docs/assets.md#public-files).
+- **Zones: immutable caching for a content-addressed URL.** A public file asked for with `?h=<hash>` or `?v=<hash>` is
+  served `Cache-Control: public, max-age=31536000, immutable`; the names are the zone's new `hashQuery` option.
+
+### Fixed
+
+- **Zones**: a zone's files carry `ETag` and `Last-Modified` and answer `If-None-Match` and `If-Modified-Since` with
+  `304`; `HEAD` answers carry `Content-Length`. Before, every revalidation sent the whole file again.
+
 ## 0.1.1 (2026-10-11)
 
 ### Fixed

@@ -14,6 +14,7 @@ const path = require("node:path");
 const { expect } = require("./next-contract.cjs");
 const { pathToFileURL } = require("node:url");
 const { createEndpoints } = require("./endpoints.cjs");
+const { sendAsset } = require("./send.cjs");
 const { missingBuildOptions } = require("../build-options.cjs");
 
 /* A full garbage collection, for memory measurements: Node's gc() when started with --expose-gc, else one obtained
@@ -176,13 +177,8 @@ function createServer(ctx, { assets, installer, bench, collector }) {
       req.url = `/_not-found${url.search}`;
       return handle(req, res);
     }
-    const asset = assets.zoneAsset(url.pathname);
-    if (asset && (req.method === "GET" || req.method === "HEAD")) {
-      res.writeHead(200, { "content-type": asset.contentType, "cache-control": asset.cacheControl });
-      if (req.method === "HEAD") return res.end();
-      fs.createReadStream(asset.file).pipe(res);
-      return;
-    }
+    const asset = assets.zoneAsset(url.pathname, url.searchParams);
+    if (asset && (req.method === "GET" || req.method === "HEAD")) return sendAsset(req, res, asset);
     /* A Pages Router page of a zone renders with its zone's build id, so its client asks for /_next/data/<that id>/…:
        Next's router knows the shell's only, so the request is read as the shell's (the page then renders with its
        zone's id again: hooks.cjs). */

@@ -18,7 +18,7 @@ These are the facts an assistant most often gets wrong. Each is detailed in the 
   import { zoneConfig } from "@runsnip/next-zones/config";
   export default zoneConfig({ mount: "/blog", aliases: [], transpilePackages: ["shared"] });
   ```
-  `zoneConfig` takes out its own keys (`mount`, `aliases`, `livePull`, `endpoints`, `mode`, `metrics`, `mcp`) and passes every other key to Next unchanged. A Next config that is a function of the phase comes second: `zoneConfig({ mount: "/blog" }, (phase) => ({ … }))`; Next keys left in the first object are kept; the function's result wins on a key both set. The older form `zoneConfig({ mount }, { …nextConfig })` is still read the same way. `endpoints`, `mode`, `metrics` and `mcp` are the shell's only.
+  `zoneConfig` takes out its own keys (`mount`, `aliases`, `livePull`, `hashQuery`, `endpoints`, `mode`, `metrics`, `mcp`) and passes every other key to Next unchanged. A Next config that is a function of the phase comes second: `zoneConfig({ mount: "/blog" }, (phase) => ({ … }))`; Next keys left in the first object are kept; the function's result wins on a key both set. The older form `zoneConfig({ mount }, { …nextConfig })` is still read the same way. `endpoints`, `mode`, `metrics` and `mcp` are the shell's only.
 - **What a zone may not do** (Zones refuses it at install, with the reason): its own `proxy.ts`, an `instrumentation-client` file, the edge runtime (today; planned), routes outside its mount or aliases (`pages/api/`, served at `/api/…`, among them), files at the root of `public/` (put them under `public/<mount>/…`), and `basePath`, `i18n`, `trailingSlash`, `assetPrefix`, `skipTrailingSlashRedirect`, `cacheComponents`, `partialPrefetching` different from the shell's, or an `images` key the zone sets that differs from the shell's (a zone with no `images` config fits any shell; zone-level `images` is planned). Every zone uses the shell's Next, React and react-dom versions.
 - **Build options are next-zones' to set.** Only in `next-zones build`, `zoneConfig` turns Turbopack's scope hoisting, unused-export and unused-import removal off (`experimental.turbopackScopeHoisting`, `turbopackRemoveUnusedExports`, `turbopackRemoveUnusedImports`: `false`) and pins the project root (`turbopack.root`). Leave them unset (setting them to `false` is harmless; `turbopack.root`/`outputFileTracingRoot` may be set if the shell and every zone share that root): a config that sets any of the three otherwise is refused in a build for Zones. Zones refuses an image built without them.
 - **Building** (in the workspace's folder):
@@ -32,6 +32,7 @@ These are the facts an assistant most often gets wrong. Each is detailed in the 
 - **Zones' own URLs** (`/_next-zones/…`) exist only when the shell declares them: `endpoints: { events, health, admin }`. `events` and `health` are public (health's details go to an admin only); `admin` URLs need `Authorization: Bearer <NEXT_ZONES_ADMIN_TOKEN>`, or a request from the same machine when no token is set.
 - **The Pages Router works** (every mode): a zone's pages live in `pages/<mount>/…`, its own `_app` and `_document` at the top of `pages/`. Each Pages Router page renders whole in its zone's build (its document, build id, chunks): soft navigation inside the zone keeps `_app` state; going to another zone, or between the App Router and the Pages Router, loads a new document (Next's rule). `getStaticProps`, `getStaticPaths` (with `fallback`, `revalidate`) and `getServerSideProps` work.
 - **A 404 under a zone's mount is the zone's own** (every mode): a URL there that nothing serves, or a page answering `notFound`, gets the zone's `app/not-found` (with an `app/` folder; Next never shows `pages/404` then) or its `pages/404`/`_error` (only `pages/`), as when the zone runs alone; a zone without one, and every URL outside the zones, get the shell's.
+- **A zone's public files** are served by Zones before Next: a `.br`/`.gz` sibling (`a.ttf.br`) is sent with `Content-Encoding` when `Accept-Encoding` allows it (never for a `Range` request, which gets the plain file's bytes), with `ETag`, `Last-Modified` and `Vary: Accept-Encoding`; a URL with `?h=<hash>` or `?v=<hash>` (hex 8+ characters, or base64url 16+) is served `Cache-Control: public, max-age=31536000, immutable`, otherwise `public, max-age=0`. The parameter names are the zone's `hashQuery` (`false`: never).
 - **Open tabs follow a new version** when the shell renders `<ZoneUpdates />` from `@runsnip/next-zones/client` and declares `endpoints: { events: true }`; a Pages Router zone renders it in its own `_app` too.
 - **MCP:** the shell's `zoneConfig({ mcp: Mcp({ tools: Tools(LivePull(), Metrics(), Tool({ name, description, input, handler })), skills: Skills(…), auth: [Bearer({ env }), OAuth({ issuer })] }) })` (from `@runsnip/next-zones/mcp`) makes Zones an MCP server at `/_next-zones/mcp`, whatever `endpoints` are declared (all off included). Zones' own tools (`zones_status`, `zones_images`, `zones_pull`, `zones_install`, `zones_stop`, `zones_resume`, `zones_metrics`) are optional; your `Tool(…)`s reach Zones only as far as their `zones: ["read" | "pull" | "install" | "prune" | "stop"]` declares. A pull on request needs the zone's `livePull`. No `auth`: the admin rule. `OAuth(…)` needs `@runsnip/jwks` (an optional peer dependency) or another implementation of its contract as `Mcp({ jwks })`. Tools run in Zones' process: run untrusted code elsewhere. Zones only (not mode `"single"`).
 - **Metrics:** the shell's `metrics: true` opens one store for the process, read as Prometheus text at `/_next-zones/metrics` by an admin. `metrics: true` alone opens that URL: no `endpoints` declaration is needed. A zone's code measures with `counter`, `gauge`, `histogram` and `time` from `@runsnip/next-zones/metrics`; with metrics off they do nothing.
@@ -344,6 +345,7 @@ kept, and the second wins on a key both set.
 | `metrics` | `boolean` | no (the shell only), `false` | Opens one metrics store for the whole Zones process: requests by zone and version, installs, pulls, memory, and what a zone's code writes with `@runsnip/next-zones/metrics`; served as Prometheus text at `<base>/metrics` to an admin. Off, the metrics functions do nothing. See [metrics](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/metrics.md) |
 | `mcp` | `Mcp(…)` | no (the shell only) | Zones as an MCP server: Zones' own tools (`LivePull()`, `Metrics()`), yours (`Tool(…)`), skills and authorization, at its own path whatever `endpoints` are declared. See [Zones as an MCP server](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/mcp.md) |
 | `livePull` | `boolean` | no, `false` | Whether a ping (an admin request to Zones' `<base>/images/<zone>/<version>/pull` or `/install`) may make Zones pull this zone's images from its sources. Recorded in each zone image's `zone.json`; read from the zone's latest image before anything is fetched. Without it, the zone's images are pulled on the server side only (`next-zones pull`, a deploy step). Images already in the store install either way. See [live pulls](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#live-pulls) |
+| `hashQuery` | `string[]` \| `false` | no, `["h", "v"]` | The query parameters that name one of the zone's public files by its content. A request such as `/blog/logo.png?h=3f2a9c01d4e5b6a7`, where one of them has a hash-shaped value (hex of 8 or more characters, or base64url of 16 or more), is answered with `Cache-Control: public, max-age=31536000, immutable`; without one, `public, max-age=0`, Next's default for `public/`. `false`: never. Recorded in each zone image's `zone.json`. The shell's `public/` is Next's and does not read it. See [public files](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/assets.md#public-files) |
 
 An invalid declaration throws as soon as `next.config` is loaded, for example: `mount must be "/" (the shell) or one
 URL segment like "/blog"`.
@@ -847,6 +849,28 @@ blog/public/favicon.ico       → refused: outside the zone's mount
 
 The root (`/favicon.ico`, `/robots.txt`…) belongs to the shell. A public file takes precedence over a dynamic route
 at the same URL, as in Next.
+
+Zones serves a zone's public files itself, before Next sees the request, the same way behind any front proxy:
+
+- **Precompressed siblings.** A file with a `.br` or `.gz` next to it (`fonts/a.ttf` and `fonts/a.ttf.br`) is sent as
+  that sibling when the request's `Accept-Encoding` allows it (q-values read; brotli first on a tie), with
+  `Content-Encoding`, the original's `Content-Type`, the sibling's `Content-Length`, and `Vary: Accept-Encoding` on
+  every answer for that file. A sibling is only ever sent for a file that exists; asked for by its own name
+  (`a.ttf.br`), it is an ordinary file. Compress at build time, as hard as you like (`brotli -q 11`): nothing is
+  compressed while serving.
+- **Ranges.** A single byte range of the file as it is (`206`, `If-Range` honoured, `416` when unsatisfiable). A
+  `Range` request is never answered from a sibling: a range of brotli bytes is of no use to a client that asked for a
+  part of the file, and the server picks the representation (RFC 9110), so it gets the identity one. Several ranges
+  get the whole file.
+- **Validators.** A strong `ETag` per representation (the brotli answer's differs from the plain one's) and
+  `Last-Modified`; `If-None-Match`, else `If-Modified-Since`, answers `304`. `HEAD` answers the same headers as `GET`.
+- **Caching.** `Cache-Control: public, max-age=0` (Next's default for `public/`), unless the URL names the file by its
+  content: `?h=<hash>` or `?v=<hash>`, a hex value of 8 or more characters or a base64url one of 16 or more. Those
+  are served `public, max-age=31536000, immutable`. The parameter names are the zone's
+  [`hashQuery`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/configuration.md#zone) (`false`: never).
+
+A front proxy that compresses on its own must leave an answer that already has `Content-Encoding` alone: Caddy's
+`encode` and nginx's `gzip` both do.
 
 ---
 
