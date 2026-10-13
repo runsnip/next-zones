@@ -188,11 +188,16 @@ function payloadTransform({ buildId, shellBuildId, mainChunks = [], idMap = {}, 
  * manifests were changed). A soft navigation between the shell and a zone keeps the root the browser has (both are
  * the segment ""), so the root's stylesheets in a prerendered page (its .rsc, served whole to a navigation, and its
  * segments, for a prefetch) never load: the segment below the root names them as well. React loads a stylesheet once
- * whoever names it. Only row 0 is read: a full tree (`f`, its root's seed inline) or a segment (`rsc`, or `data`, a
- * list of segments); anything else, or a part sent as a row of its own, is left as it is.
+ * whoever names it. Row 0 is read, and the rows it refers to for the segment below the root:
+ * - up to Next 16.3, a full tree `f: [[tree, seed, …]]` (the seed's children inline), or a segment `{buildId, rsc}`
+ *   or `{buildId, data: [{rsc}, …]}`;
+ * - from Next 16.4, a tree `t: {t: {s, d: {r}, c}}` from the root, its children (`c`) a Map, as a row of its own
+ *   (`"$Q<id>"`) or inline, of slot → segment (`{s, d: {r}, c}`, or a row: `"$<id>"`).
+ * Anything else is left as it is.
  */
 const isStylesheet = (el) => Array.isArray(el) && el[0] === "$" && el[1] === "link" && el[3]?.rel === "stylesheet" && typeof el[3].href === "string";
 const childrenOf = (node) => (Array.isArray(node) && node[0] === "$" && Array.isArray(node[3]?.children) ? node[3].children : null);
+const linksOf = (node) => { const assets = childrenOf(node)?.[0]; return Array.isArray(assets) ? assets.filter(isStylesheet) : []; };
 /* A segment's own assets (links, scripts) are its node's first child, a page's its second (Next's createComponentTree):
    a page's first child is its element. */
 function addLinks(node, links) {
@@ -207,50 +212,59 @@ function addLinks(node, links) {
   children[at] = [...missing, ...(slot ?? [])];
   return true;
 }
-const ROW0 = Buffer.from("0:", "latin1");
-function editRow0(stream, edit) {
-  if (!stream || stream.length < 2) return stream;
-  let start = stream.subarray(0, 2).equals(ROW0) ? 0 : stream.indexOf(Buffer.from("\n0:", "latin1"));
-  if (start < 0) return stream;
+/* A line row of a flight stream by its id: where its JSON is, and the JSON read. */
+function rowAt(stream, id) {
+  const head = Buffer.from(`${id}:`, "latin1");
+  let start = stream.subarray(0, head.length).equals(head) ? 0 : stream.indexOf(Buffer.concat([Buffer.from([0x0a]), head]));
+  if (start < 0) return null;
   if (start > 0) start += 1;
-  const end = stream.indexOf(0x0a, start);
-  const line = stream.toString("utf8", start + 2, end < 0 ? stream.length : end);
-  let row;
-  try { row = JSON.parse(line); } catch { return stream; }
-  if (!row || typeof row !== "object" || !edit(row)) return stream;
-  return Buffer.concat([stream.subarray(0, start + 2), Buffer.from(JSON.stringify(row), "utf8"), end < 0 ? Buffer.alloc(0) : stream.subarray(end)]);
+  const from = start + head.length, newline = stream.indexOf(0x0a, from), to = newline < 0 ? stream.length : newline;
+  try { return { from, to, value: JSON.parse(stream.toString("utf8", from, to)) }; } catch { return null; }
 }
-/** The root's stylesheet links in a full tree's row 0 (`f` of one path: [tree, seed, head, …]), or []. */
-function rootLinks(rscData) {
-  let links = [];
-  editRow0(rscData, (row) => {
-    const seed = Array.isArray(row.f) && row.f.length === 1 && row.f[0].length >= 3 ? row.f[0][1] : null;
-    const assets = childrenOf(seed?.[0])?.[0];
-    if (Array.isArray(assets)) links = assets.filter(isStylesheet);
-    return false;
-  });
-  return links;
+const withRow = (stream, row) => Buffer.concat([stream.subarray(0, row.from), Buffer.from(JSON.stringify(row.value), "utf8"), stream.subarray(row.to)]);
+const ref = (value, tag) => (typeof value === "string" ? new RegExp(`^\\$${tag}([0-9a-f]+)$`).exec(value)?.[1] ?? null : null);
+/* Next 16.4's tree: the segment below the root (the "children" slot) given the links, in the row it is written in. */
+function treeChild(stream, row0, root, links) {
+  let mapRow = row0, entries = root.c;
+  const mapId = ref(root.c, "Q");
+  if (mapId) { mapRow = rowAt(stream, mapId); entries = mapRow?.value; }
+  if (!Array.isArray(entries)) return stream;
+  const entry = entries.find((e) => Array.isArray(e) && e[0] === "children") ?? entries[0];
+  if (!Array.isArray(entry)) return stream;
+  const nodeId = ref(entry[1], "");
+  const nodeRow = nodeId ? rowAt(stream, nodeId) : mapRow;
+  const segment = nodeId ? nodeRow?.value : entry[1];
+  return segment?.d && addLinks(segment.d.r, links) ? withRow(stream, nodeRow) : stream;
 }
 /** `rscData` and `segmentData` (a Map of segment path → flight data, or null) with the root's stylesheets named below. */
 function withRootCss(rscData, segmentData) {
-  const links = rootLinks(rscData);
-  if (!links.length) return { rscData, segmentData };
-  const full = (stream) => editRow0(stream, (row) => {
-    const seed = Array.isArray(row.f) && row.f.length === 1 && row.f[0].length >= 3 ? row.f[0][1] : null;
-    const child = seed?.[1]?.children;
-    return Array.isArray(child) && addLinks(child[0], links);
-  });
-  const segment = (stream) => editRow0(stream, (row) => {
-    if (typeof row.buildId !== "string") return false;
-    if (row.rsc !== undefined) return addLinks(row.rsc, links);
-    return Array.isArray(row.data) && row.data.length > 0 && addLinks(row.data[0]?.rsc, links);
-  });
+  const root0 = rscData && rowAt(rscData, "0");
+  const full16 = root0 && Array.isArray(root0.value.f) && root0.value.f.length === 1 ? root0.value.f[0] : null;
+  const known = full16 ? linksOf(full16[1]?.[0]) : linksOf(root0?.value?.t?.t?.d?.r);
+  const edit = (stream) => {
+    const row0 = stream && rowAt(stream, "0");
+    const value = row0?.value;
+    if (!value || typeof value !== "object") return stream;
+    if (value.t?.t?.d) {
+      const links = linksOf(value.t.t.d.r);
+      return links.length ? treeChild(stream, row0, value.t.t, links) : stream;
+    }
+    if (!known.length) return stream;
+    if (Array.isArray(value.f)) {
+      const seed = value.f.length === 1 && value.f[0].length >= 3 ? value.f[0][1] : null;
+      const child = seed?.[1]?.children;
+      return Array.isArray(child) && addLinks(child[0], known) ? withRow(stream, row0) : stream;
+    }
+    if (typeof value.buildId !== "string") return stream;
+    const node = value.rsc !== undefined ? value.rsc : Array.isArray(value.data) ? value.data[0]?.rsc : null;
+    return addLinks(node, known) ? withRow(stream, row0) : stream;
+  };
   let segments = segmentData;
   if (segmentData instanceof Map) {
     segments = new Map();
-    for (const [key, value] of segmentData) segments.set(key, key === "/_full" ? full(value) : key === "/_tree" || key === "/_index" ? value : segment(value));
+    for (const [key, value] of segmentData) segments.set(key, key === "/_tree" || key === "/_index" ? value : edit(value));
   }
-  return { rscData: full(rscData), segmentData: segments };
+  return { rscData: edit(rscData), segmentData: segments };
 }
 
 /** The kind of a prerendered or exported file, for transform(): flight data, a page, or neither. */

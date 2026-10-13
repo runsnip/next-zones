@@ -76,3 +76,14 @@ test("a prerendered page: the segment below the root names the root's stylesheet
   const lazy = Buffer.from(`0:{"f":"$L1"}\n`);
   assert.equal(withRootCss(lazy, null).rscData, lazy);
 });
+
+test("from Next 16.4: the tree's root names its children by a Map row; the segment there names the root's stylesheet", () => {
+  const root = { s: "", h: 528, d: { r: ["$", "$1", "c", { children: [[link("/_next/static/chunks/root.css"), script], ["$", "html", null, {}]] }], p: false, v: null }, c: "$Q9" };
+  const layout = { s: "wide", h: 512, d: { r: ["$", "$1", "c", { children: [null, ["$", "$L7", null, {}]] }], p: false, v: null }, c: "$Qb" };
+  const stream = Buffer.from(`1:"$Sreact.fragment"\n0:${JSON.stringify({ c: ["", "wide"], t: { t: root }, b: "x" })}\n9:${JSON.stringify([["children", layout]])}\nb:[]\n`);
+  const { rscData } = withRootCss(stream, null);
+  const row = (id) => JSON.parse(rscData.toString("utf8").split("\n").find((l) => l.startsWith(`${id}:`)).slice(id.length + 1));
+  assert.deepEqual(row("9")[0][1].d.r[3].children[0], [link("/_next/static/chunks/root.css")]);
+  assert.deepEqual(row("0").t.t, root, "the root as it was");
+  assert.equal(withRootCss(rscData, null).rscData, rscData);
+});
