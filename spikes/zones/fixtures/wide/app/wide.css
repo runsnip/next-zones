@@ -1,0 +1,2 @@
+/* The zone's own stylesheet, through its root layout (zonecss.mjs): reached softly from the shell, it must load. */
+#wide-styled { color: rgb(4, 5, 6); }

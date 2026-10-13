@@ -118,6 +118,7 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
             }
           }
         }
+        if (typeof args?.manifest === "string" && args.manifest.endsWith("_client-reference-manifest.js")) return manifests.withShellRootCss(load(args));
         return load(args);
       };
       replacement = { ...mod,

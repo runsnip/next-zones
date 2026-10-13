@@ -17,7 +17,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { payloadTransform, payloadKind } = require("./zones/payload.cjs");
+const { payloadTransform, payloadKind, withRootCss } = require("./zones/payload.cjs");
 const { buildKeyOf } = require("./zones/describe.cjs");
 const ZONES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "zones");
 
@@ -84,6 +84,20 @@ export async function linkStaticSite({ shellDir, images, site }) {
     }
     if (fs.existsSync(path.join(exported, segment))) copyTree(path.join(exported, segment), path.join(site, segment), true);
     linked.push({ zone, remapped: Object.keys(result.idMap).length, chunks: Object.keys(result.chunkMap).length, mainChunk: mainChunks.length > 0 });
+  }
+  /* Every exported page, the shell's and the zones': its root layout's stylesheets named below the root in its flight
+     data (<page>.txt beside <page>.html) and its segments (__next.<segment path>.txt in its folder, the root's at the
+     top), as Zones does when it reads a prerendered page (payload.cjs withRootCss). */
+  const pages = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? (e.name === "_next" && dir === site ? [] : pages(path.join(dir, e.name))) : e.name.endsWith(".html") && fs.existsSync(path.join(dir, e.name.replace(/\.html$/, ".txt"))) ? [path.join(dir, e.name.replace(/\.html$/, ".txt"))] : []));
+  for (const file of pages(site)) {
+    const folder = path.relative(site, file) === "index.txt" ? site : file.replace(/\.txt$/, "");
+    const segments = new Map();
+    if (fs.existsSync(folder)) for (const name of fs.readdirSync(folder)) if (/^__next\..+\.txt$/.test(name)) segments.set(`/${name.slice("__next.".length, -".txt".length).replaceAll(".", "/")}`, fs.readFileSync(path.join(folder, name)));
+    const names = new Map([...segments.keys()].map((key) => [key, `__next${key.replaceAll("/", ".")}.txt`]));
+    const rscData = fs.readFileSync(file);
+    const edited = withRootCss(rscData, segments);
+    if (edited.rscData !== rscData) fs.writeFileSync(file, edited.rscData);
+    for (const [key, data] of edited.segmentData) if (data !== segments.get(key)) fs.writeFileSync(path.join(folder, names.get(key)), data);
   }
   return { site, zones: linked };
 }

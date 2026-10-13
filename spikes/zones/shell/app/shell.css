@@ -1,0 +1,2 @@
+/* The shell's own stylesheet, through its root layout (zonecss.mjs). */
+#shell-styled { color: rgb(1, 2, 3); }

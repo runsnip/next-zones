@@ -18,6 +18,18 @@ What changed in each version of `@runsnip/next-zones` on npm. The versions follo
 
 - **Zones**: a zone's files carry `ETag` and `Last-Modified` and answer `If-None-Match` and `If-Modified-Since` with
   `304`; `HEAD` answers carry `Content-Length`. Before, every revalidation sent the whole file again.
+- **Zones: a zone's Web Workers run.** A worker's runtime chunk (and a SharedWorker's) is written again when the chunks
+  it waits for are, with their new names and remapped ids, and the module that starts the worker names it so. Before,
+  only the page's runtime chunk was: a worker whose chunks were written again waited for chunks under their old names
+  and never ran its entry. Every list of chunks a zone's code holds (an async loader's, a worker's, a runtime's
+  registration) now names a chunk by its new name, whichever was written again first.
+- **Zones: a zone's stylesheets load after a soft navigation**, and the shell's after one back from a zone. The shell
+  and every zone have their own root layout at the segment `""`, so Next rendered a navigation between them from below
+  the root and left the root layout's stylesheets out (a zone's `globals.css`, say): only a full load had them. The
+  root layout's stylesheets are now named by the segments below it too: in each route's client reference manifest (the
+  shell's and the zones'), and in the flight data and segments of a page prerendered before, as Zones reads them from
+  its cache (and as `mode: "single"` and `output: "export"` link them). A stylesheet stays loaded after the navigation
+  away, as Next keeps a layout's.
 
 ## 0.1.1 (2026-10-11)
 

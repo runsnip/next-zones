@@ -1,9 +1,10 @@
 "use strict";
 /*
  * What Next reads from the shell's manifests, with the zones added: the app paths (the overlay), the prerendered
- * routes, the server actions, and each zone route's own client reference manifest with the zone's main chunk.
+ * routes, the server actions, and each zone route's own client reference manifest with the zone's main chunk; the
+ * shell's and the zones' root layout stylesheets named by the segments below the root (client-manifest.cjs).
  */
-const { clientManifestForZone } = require("./client-manifest.cjs");
+const { clientManifestForZone, rootCssBelow } = require("./client-manifest.cjs");
 
 function createManifests(ctx) {
   const prerenderMerged = new WeakMap();               // the shell's prerender manifest → { revision, value }
@@ -67,17 +68,31 @@ function createManifests(ctx) {
    */
   function withZoneMainChunks(value, zone) {
     const idMap = zone.idMap ?? {}, urls = zone.chunkUrls ?? {};
-    if ((!zone.mainChunks?.length && !Object.keys(idMap).length) || !value?.__RSC_MANIFEST) return value;
+    if (!value?.__RSC_MANIFEST) return value;
     let copy = augmented.get(value);
     if (!copy) {
       const change = { idMap, chunkUrls: urls, mainChunks: zone.mainChunks ?? [] };
-      const manifests = Object.fromEntries(Object.entries(value.__RSC_MANIFEST).map(([page, manifest]) => [page, clientManifestForZone(manifest, change)]));
+      const plain = !change.mainChunks.length && !Object.keys(idMap).length;
+      const manifests = Object.fromEntries(Object.entries(value.__RSC_MANIFEST).map(([page, manifest]) => [page, plain ? rootCssBelow(manifest) : clientManifestForZone(manifest, change)]));
       copy = { ...value, __RSC_MANIFEST: manifests };
       augmented.set(value, copy);
     }
     return copy;
   }
 
+
+  /* A shell route's client reference manifest: its root layout's stylesheets named below the root, as a zone's are,
+     so a soft navigation from a zone back to the shell brings them. Whether zones are installed yet or not: Next keeps
+     a manifest it has loaded, and a zone may be installed after. */
+  function withShellRootCss(value) {
+    if (!value?.__RSC_MANIFEST) return value;
+    let copy = augmented.get(value);
+    if (!copy) {
+      copy = { ...value, __RSC_MANIFEST: Object.fromEntries(Object.entries(value.__RSC_MANIFEST).map(([page, manifest]) => [page, rootCssBelow(manifest)])) };
+      augmented.set(value, copy);
+    }
+    return copy;
+  }
 
   /*
    * A route's react-loadable manifest: the chunks next/dynamic preloads while rendering, under their new URLs where a
@@ -95,7 +110,7 @@ function createManifests(ctx) {
     return copy;
   }
 
-  return { withZonePrerenders, withZoneActions, withZoneAppPaths, withZoneMainChunks, withZoneLoadable };
+  return { withZonePrerenders, withZoneActions, withZoneAppPaths, withZoneMainChunks, withShellRootCss, withZoneLoadable };
 }
 
 module.exports = { createManifests };

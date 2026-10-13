@@ -28,9 +28,9 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { payloadTransform, payloadKind } = require("./zones/payload.cjs");
+const { payloadTransform, payloadKind, withRootCss } = require("./zones/payload.cjs");
 const { buildKeyOf } = require("./zones/describe.cjs");
-const { clientManifestForZone } = require("./zones/client-manifest.cjs");
+const { clientManifestForZone, rootCssBelow } = require("./zones/client-manifest.cjs");
 const ZONES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "zones");
 const HASHED_EXTERNAL = /^((?:@[^/]+\/)?[^/@]+)-[0-9a-f]{16}$/;
 const PRERENDERED = /\.(html|rsc|meta|body)$/;
@@ -88,6 +88,16 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
   }
 
   const server = path.join(dist, "server");
+  /* The shell's pages: their root layout's stylesheets named below the root, as the zones' are (client-manifest.cjs),
+     so a soft navigation between the shell and a zone brings each one's. */
+  if (fs.existsSync(path.join(server, "app"))) walk(path.join(server, "app"), (rel) => {
+    if (!rel.endsWith("_client-reference-manifest.js")) return;
+    const file = path.join(server, "app", rel);
+    const sandbox = { globalThis: {} };
+    new Function("globalThis", fs.readFileSync(file, "utf8"))(sandbox.globalThis);
+    const entries = Object.entries(sandbox.globalThis.__RSC_MANIFEST ?? {});
+    fs.writeFileSync(file, `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};\n${entries.map(([key, value]) => `globalThis.__RSC_MANIFEST[${JSON.stringify(key)}] = ${JSON.stringify(rootCssBelow(value))};`).join("\n")}\n`);
+  });
   const appPaths = readJson(path.join(server, "app-paths-manifest.json"), {});
   const appPathRoutes = readJson(path.join(dist, "app-path-routes-manifest.json"), {});
   const routes = readJson(path.join(dist, "routes-manifest.json"), {});
@@ -414,5 +424,17 @@ if (notFoundZones.length) {
   writeJsManifest(path.join(server, "server-reference-manifest.js"), "__RSC_SERVER_MANIFEST", actions);
   writeJson(path.join(server, "next-font-manifest.json"), fonts);
   writeJsManifest(path.join(server, "next-font-manifest.js"), "__NEXT_FONT_MANIFEST", fonts);
+  /* Every prerendered page, the shell's and the zones': its root layout's stylesheets named below the root in its flight
+     data and its segments (payload.cjs withRootCss), as Zones does when it reads one. */
+  if (fs.existsSync(path.join(server, "app"))) walk(path.join(server, "app"), (rel) => {
+    if (!rel.endsWith(".rsc") || rel.includes(".segments/")) return;
+    const file = path.join(server, "app", rel), segmentsDir = file.replace(/\.rsc$/, ".segments");
+    const segments = new Map();
+    if (fs.existsSync(segmentsDir)) walk(segmentsDir, (s) => { if (s.endsWith(".segment.rsc")) segments.set(`/${s.slice(0, -".segment.rsc".length)}`, fs.readFileSync(path.join(segmentsDir, s))); });
+    const rscData = fs.readFileSync(file);
+    const edited = withRootCss(rscData, segments);
+    if (edited.rscData !== rscData) fs.writeFileSync(file, edited.rscData);
+    for (const [key, data] of edited.segmentData) if (data !== segments.get(key)) fs.writeFileSync(path.join(segmentsDir, `${key.slice(1)}.segment.rsc`), data);
+  });
   return { out, zones: linked };
 }

@@ -262,20 +262,72 @@ const chunkSource = (groups, sourceOf) => {
   if (!loose.length) return `(()=>{"use strict";${PUSH(strict)}})();\n`;
   return `${PUSH((strict.length ? [`(()=>{"use strict";return[${strict.join(",")}]})()`] : []).concat(loose))}\n`;
 };
-/* The chunks written again: those holding a remapped module or a require of one, then, until none is added, those
-   naming a chunk written again (an async loader's list): the browser must never load a chunk under its old name once
-   it has a new one, since the old file still registers the old ids (a module aliased to the shell's id is not
-   registered under the zone's own id by anything else: "module factory is not available"). */
+/* Turbopack's runtime chunks register themselves with the chunks to wait for and the modules to run first,
+   `{otherChunks: [paths], runtimeModuleIds: [ids]}`: the zone's own documents' runtime (a prerendered page of the zone
+   keeps its build's root main files), and each Web Worker's and SharedWorker's, which a module starts with its list of
+   chunks, that runtime chunk last (`e.b(bootstrap, [chunks…, "static/chunks/turbopack-….js"])`). The registration is
+   read with a parser: where its chunk paths and ids are. */
+const parser = createRequire(path.join(shellDist, "..", "package.json"))("next/dist/compiled/acorn");
+function registrationRefs(text) {
+  let ast;
+  try { ast = parser.parse(text, { ecmaVersion: "latest", sourceType: "script" }); } catch { return []; }
+  const keyOf = (p) => (p.type === "Property" && !p.computed ? (p.key.type === "Identifier" ? p.key.name : p.key.value) : null);
+  const refs = [];
+  const visit = (node) => {
+    if (!node || typeof node.type !== "string") return;
+    if (node.type === "ObjectExpression" && node.properties.some((p) => keyOf(p) === "otherChunks")) {
+      for (const p of node.properties) {
+        const list = p.value?.type === "ArrayExpression" ? p.value.elements : [];
+        if (keyOf(p) === "otherChunks") {
+          for (const el of list) {
+            /* A path, or { path, … }. */
+            const lit = el?.type === "Literal" ? el : el?.type === "ObjectExpression" ? el.properties.find((q) => keyOf(q) === "path")?.value : null;
+            if (lit?.type === "Literal" && typeof lit.value === "string") refs.push({ start: lit.start, end: lit.end, chunk: lit.value });
+          }
+        }
+        if (keyOf(p) === "runtimeModuleIds") for (const el of list) if (el?.type === "Literal") refs.push({ start: el.start, end: el.end, id: String(el.value) });
+      }
+      return;
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "start" || key === "end") continue;
+      const v = node[key];
+      if (Array.isArray(v)) v.forEach(visit); else if (v && typeof v.type === "string") visit(v);
+    }
+  };
+  visit(ast);
+  return refs;
+}
+/* Not a Pages Router page's runtime: those pages run in documents of their own, on chunks as built. */
+const pagesRuntimes = pagesOnly(dist);
+const runtimes = fs.readdirSync(path.join(dist, "static", "chunks")).filter((f) => isRuntime(f) && !pagesRuntimes.has(f)).flatMap((file) => {
+  const text = fs.readFileSync(path.join(dist, "static", "chunks", file), "utf8");
+  const refs = registrationRefs(text);
+  return refs.length ? [{ file, text, refs }] : [];
+});
+const runtimeTouched = (r) => r.refs.some((ref) => (ref.chunk ? chunkMap[ref.chunk] : idMap[ref.id] !== undefined));
+
+/* The chunks written again: those holding a remapped module or a require of one, and the runtime chunks registering
+   one; then, until none is added, those naming a chunk written again (an async loader's list, a worker's list, a
+   runtime's registration): the browser must never load a chunk under its old name once it has a new one, since the
+   old file still registers the old ids (a module aliased to the shell's id is not registered under the zone's own id
+   by anything else: "module factory is not available"), and a runtime waits for chunks by name (a worker whose
+   runtime waits for an old name never runs its entry). */
 const renamedOf = (file) => file.replace(/\.js$/, `-z${buildKey.slice(0, 8)}.js`);
+const rename = (file) => { chunkMap[`static/chunks/${file}`] = `static/chunks/${renamedOf(file)}`; };
 if (Object.keys(idMap).length) {
   const touched = (c) => c.groups.some((g) => g.ids.some((id) => idMap[id] !== undefined) || requiredBy(g).some((d) => idMap[d] !== undefined));
-  for (const c of chunks) if (touched(c)) chunkMap[`static/chunks/${c.file}`] = `static/chunks/${renamedOf(c.file)}`;
+  for (const c of chunks) if (touched(c)) rename(c.file);
   for (let added = true; added;) {
     added = false;
     for (const c of chunks) {
-      if (chunkMap[`static/chunks/${c.file}`]) continue;
-      if (!c.groups.some((g) => read(g).chunks.some((k) => chunkMap[k.path]))) continue;
-      chunkMap[`static/chunks/${c.file}`] = `static/chunks/${renamedOf(c.file)}`;
+      if (chunkMap[`static/chunks/${c.file}`] || !c.groups.some((g) => read(g).chunks.some((k) => chunkMap[k.path]))) continue;
+      rename(c.file);
+      added = true;
+    }
+    for (const r of runtimes) {
+      if (chunkMap[`static/chunks/${r.file}`] || !runtimeTouched(r)) continue;
+      rename(r.file);
       added = true;
     }
   }
@@ -291,57 +343,18 @@ if (Object.keys(chunkMap).length) {
     writeAtomic(path.join(outDir, path.basename(renamed)), chunkSource(c.groups, remapSource));
     for (const g of c.groups) g.output = remapSource(g);
   }
-}
-
-/* The zone's runtime chunk, which its own documents load (a prerendered page of the zone keeps its build's root main
-   files): it registers itself with the chunks to wait for and the modules to run first, `{otherChunks: [paths],
-   runtimeModuleIds: [ids]}`. Those name chunks written again and remapped ids too: written again, under a new name,
-   when they do (else the runtime waits for chunks no script registers, and the page never hydrates). */
-const parser = createRequire(path.join(shellDist, "..", "package.json"))("next/dist/compiled/acorn");
-function runtimeEdits(text) {
-  let ast;
-  try { ast = parser.parse(text, { ecmaVersion: "latest", sourceType: "script" }); } catch { return []; }
-  const keyOf = (p) => (p.type === "Property" && !p.computed ? (p.key.type === "Identifier" ? p.key.name : p.key.value) : null);
-  const edits = [];
-  const visit = (node) => {
-    if (!node || typeof node.type !== "string") return;
-    if (node.type === "ObjectExpression" && node.properties.some((p) => keyOf(p) === "otherChunks")) {
-      for (const p of node.properties) {
-        const list = p.value?.type === "ArrayExpression" ? p.value.elements : [];
-        if (keyOf(p) === "otherChunks") {
-          for (const el of list) {
-            /* A path, or { path, … }. */
-            const lit = el?.type === "Literal" ? el : el?.type === "ObjectExpression" ? el.properties.find((q) => keyOf(q) === "path")?.value : null;
-            if (lit?.type === "Literal" && typeof lit.value === "string" && chunkMap[lit.value]) edits.push({ start: lit.start, end: lit.end, text: JSON.stringify(chunkMap[lit.value]) });
-          }
-        }
-        if (keyOf(p) === "runtimeModuleIds") {
-          for (const el of list) if (el?.type === "Literal" && idMap[String(el.value)] !== undefined) edits.push({ start: el.start, end: el.end, text: JSON.stringify(idMap[String(el.value)]) });
-        }
-      }
-      return;
-    }
-    for (const key of Object.keys(node)) {
-      if (key === "start" || key === "end") continue;
-      const v = node[key];
-      if (Array.isArray(v)) v.forEach(visit); else if (v && typeof v.type === "string") visit(v);
-    }
-  };
-  visit(ast);
-  return edits;
-}
-if (Object.keys(chunkMap).length) {
-  for (const f of (zoneBuildManifest().rootMainFiles ?? []).filter(isRuntime)) {
-    const file = path.join(dist, f);
-    if (!fs.existsSync(file)) continue;
-    const text = fs.readFileSync(file, "utf8");
-    const edits = runtimeEdits(text).sort((a, b) => a.start - b.start);
-    if (!edits.length) continue;
+  /* A runtime chunk written again: its registration's paths and ids named again, the rest as built. */
+  for (const r of runtimes) {
+    const renamed = chunkMap[`static/chunks/${r.file}`];
+    if (!renamed) continue;
     let out = "", at = 0;
-    for (const e of edits) { out += text.slice(at, e.start) + e.text; at = e.end; }
-    const renamed = renamedOf(path.basename(f));
-    writeAtomic(path.join(outDir, renamed), out + text.slice(at));
-    chunkMap[`static/chunks/${path.basename(f)}`] = `static/chunks/${renamed}`;
+    for (const ref of [...r.refs].sort((a, b) => a.start - b.start)) {
+      const to = ref.chunk ? chunkMap[ref.chunk] : idMap[ref.id];
+      if (to === undefined) continue;
+      out += r.text.slice(at, ref.start) + JSON.stringify(to);
+      at = ref.end;
+    }
+    writeAtomic(path.join(outDir, path.basename(renamed)), out + r.text.slice(at));
   }
 }
 

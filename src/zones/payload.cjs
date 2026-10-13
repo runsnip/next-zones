@@ -182,7 +182,78 @@ function payloadTransform({ buildId, shellBuildId, mainChunks = [], idMap = {}, 
   };
 }
 
+/*
+ * A prerendered page's flight data with the root layout's stylesheets named by the segment below the root too: what
+ * client-manifest.cjs rootCssBelow does to a render, done to what was rendered before (at build time, or before the
+ * manifests were changed). A soft navigation between the shell and a zone keeps the root the browser has (both are
+ * the segment ""), so the root's stylesheets in a prerendered page (its .rsc, served whole to a navigation, and its
+ * segments, for a prefetch) never load: the segment below the root names them as well. React loads a stylesheet once
+ * whoever names it. Only row 0 is read: a full tree (`f`, its root's seed inline) or a segment (`rsc`, or `data`, a
+ * list of segments); anything else, or a part sent as a row of its own, is left as it is.
+ */
+const isStylesheet = (el) => Array.isArray(el) && el[0] === "$" && el[1] === "link" && el[3]?.rel === "stylesheet" && typeof el[3].href === "string";
+const childrenOf = (node) => (Array.isArray(node) && node[0] === "$" && Array.isArray(node[3]?.children) ? node[3].children : null);
+/* A segment's own assets (links, scripts) are its node's first child, a page's its second (Next's createComponentTree):
+   a page's first child is its element. */
+function addLinks(node, links) {
+  const children = childrenOf(node);
+  if (!children || !links.length) return false;
+  const at = Array.isArray(children[0]) && children[0][0] === "$" ? 1 : 0;
+  const slot = children[at];
+  if (slot != null && !(Array.isArray(slot) && slot.every((el) => Array.isArray(el) && el[0] === "$"))) return false;
+  const have = new Set((slot ?? []).filter(isStylesheet).map((el) => el[3].href));
+  const missing = links.filter((el) => !have.has(el[3].href));
+  if (!missing.length) return false;
+  children[at] = [...missing, ...(slot ?? [])];
+  return true;
+}
+const ROW0 = Buffer.from("0:", "latin1");
+function editRow0(stream, edit) {
+  if (!stream || stream.length < 2) return stream;
+  let start = stream.subarray(0, 2).equals(ROW0) ? 0 : stream.indexOf(Buffer.from("\n0:", "latin1"));
+  if (start < 0) return stream;
+  if (start > 0) start += 1;
+  const end = stream.indexOf(0x0a, start);
+  const line = stream.toString("utf8", start + 2, end < 0 ? stream.length : end);
+  let row;
+  try { row = JSON.parse(line); } catch { return stream; }
+  if (!row || typeof row !== "object" || !edit(row)) return stream;
+  return Buffer.concat([stream.subarray(0, start + 2), Buffer.from(JSON.stringify(row), "utf8"), end < 0 ? Buffer.alloc(0) : stream.subarray(end)]);
+}
+/** The root's stylesheet links in a full tree's row 0 (`f` of one path: [tree, seed, head, …]), or []. */
+function rootLinks(rscData) {
+  let links = [];
+  editRow0(rscData, (row) => {
+    const seed = Array.isArray(row.f) && row.f.length === 1 && row.f[0].length >= 3 ? row.f[0][1] : null;
+    const assets = childrenOf(seed?.[0])?.[0];
+    if (Array.isArray(assets)) links = assets.filter(isStylesheet);
+    return false;
+  });
+  return links;
+}
+/** `rscData` and `segmentData` (a Map of segment path → flight data, or null) with the root's stylesheets named below. */
+function withRootCss(rscData, segmentData) {
+  const links = rootLinks(rscData);
+  if (!links.length) return { rscData, segmentData };
+  const full = (stream) => editRow0(stream, (row) => {
+    const seed = Array.isArray(row.f) && row.f.length === 1 && row.f[0].length >= 3 ? row.f[0][1] : null;
+    const child = seed?.[1]?.children;
+    return Array.isArray(child) && addLinks(child[0], links);
+  });
+  const segment = (stream) => editRow0(stream, (row) => {
+    if (typeof row.buildId !== "string") return false;
+    if (row.rsc !== undefined) return addLinks(row.rsc, links);
+    return Array.isArray(row.data) && row.data.length > 0 && addLinks(row.data[0]?.rsc, links);
+  });
+  let segments = segmentData;
+  if (segmentData instanceof Map) {
+    segments = new Map();
+    for (const [key, value] of segmentData) segments.set(key, key === "/_full" ? full(value) : key === "/_tree" || key === "/_index" ? value : segment(value));
+  }
+  return { rscData: full(rscData), segmentData: segments };
+}
+
 /** The kind of a prerendered or exported file, for transform(): flight data, a page, or neither. */
 const payloadKind = (file) => (/\.html$/.test(file) ? "html" : /\.(rsc|txt)$/.test(file) ? "flight" : "plain");
 
-module.exports = { payloadTransform, payloadKind, flightEdits, applyEdits };
+module.exports = { payloadTransform, payloadKind, flightEdits, applyEdits, withRootCss };
