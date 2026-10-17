@@ -237,9 +237,26 @@ async function serve() {
     ...(minFree !== undefined ? { minFree: wholeNumber(minFree, "--min-free") * 1048576 } : {}),
   };
   const port = Number(flag("port", process.env.PORT ?? 3000)), host = flag("host", "0.0.0.0");
+  /* SIGTERM (a supervisor stopping it: `docker stop`, a rolling deploy) or SIGINT drains: no new connection, the
+     requests in flight answered, open tabs' streams ended so they reconnect to a Zones that stays, then exit 0. Its
+     limit: --drain-timeout (ms, NEXT_ZONES_DRAIN_TIMEOUT_MS), 25 s by default, under Docker's and compose's grace.
+     Before it serves there is nothing to drain: it exits at once. A second signal exits at once too. */
+  const drainTimeout = wholeNumber(flag("drain-timeout", process.env.NEXT_ZONES_DRAIN_TIMEOUT_MS ?? "25000"), "--drain-timeout");
+  let server = null, listening = false, stopping = false;
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.on(signal, () => {
+      if (stopping || !listening) process.exit(listening ? 1 : 0);
+      stopping = true;
+      console.log(`next-zones: ${signal}, draining (at most ${drainTimeout} ms)`);
+      server.drain({ timeoutMs: drainTimeout }).then(
+        (r) => { console.log(`next-zones: drained in ${r.ms} ms (${r.streams} event streams ended${r.timedOut ? ", requests still in flight closed" : ""})`); process.exit(0); },
+        (error) => { console.error(error); process.exit(1); });
+    });
+  }
   const { createZones } = createRequire(import.meta.url)("./zones/index.cjs");
-  const server = createZones(options);
+  server = createZones(options);
   await server.listen(port, host);
+  listening = true;
   console.log(`next-zones: Zones on http://${host}:${port}, shell ${path.resolve(shell)}`);
   for (const [zone, z] of Object.entries(server.zones())) console.log(`  ${zone} ${z.version ?? z.versions?.join(", ")} ${z.state}`);
 }

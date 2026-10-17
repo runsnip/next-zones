@@ -103,7 +103,22 @@ declare namespace nextZonesZones {
     stop(name: string): Promise<StopResult>;
     /** Resumes a stopped zone, with no install. */
     resume(name: string): Promise<StopResult>;
-    close(): Promise<void>;
+    /**
+     * Stops serving without failing a request: no new connections, open event streams ended (tabs reconnect through
+     * the proxy), in-flight requests finished with `Connection: close`, health answering 503 meanwhile. `timeoutMs`
+     * (default no limit): then the connections still open are closed.
+     */
+    drain(options?: { timeoutMs?: number }): Promise<DrainResult>;
+    /** The same as drain(). */
+    close(options?: { timeoutMs?: number }): Promise<DrainResult>;
+  }
+  interface DrainResult {
+    /** Event streams that were open and ended. */
+    streams: number;
+    /** From the drain's start to Next closed. */
+    ms: number;
+    /** Whether requests were still in flight at `timeoutMs`, their connections closed. */
+    timedOut: boolean;
   }
 }
 

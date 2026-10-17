@@ -119,8 +119,8 @@ machine (a loopback address).
 
 | Group | Endpoint | What it does |
 |---|---|---|
-| `events` | `GET <base>/events` | The swap events [`<ZoneUpdates />`](updates.md) listens to: only zone names and versions. Public |
-| `health` | `GET <base>/health` | Public: 200 `{ ok, degraded }` once Zones serves, for a supervisor such as Docker's `HEALTHCHECK`. A zone that failed at boot makes it `degraded`, not unhealthy: a restart would not fix its build. An admin also gets every zone and its state ([below](#zones-and-their-state)), the boot failures, uptime and RSS |
+| `events` | `GET <base>/events` | The swap events [`<ZoneUpdates />`](updates.md) listens to: only zone names and versions, after a `hello` naming what the process serves ([rolling deploys](#rolling-deploys)). Public |
+| `health` | `GET <base>/health` | Public: 200 `{ ok, degraded }` once Zones serves (503 `{ ok: false, draining: true }` while it [drains](#rolling-deploys)), for a supervisor such as Docker's `HEALTHCHECK`. A zone that failed at boot makes it `degraded`, not unhealthy: a restart would not fix its build. An admin also gets every zone and its state ([below](#zones-and-their-state)), the boot failures, uptime and RSS |
 | `admin` (every endpoint of the group needs the admin token) | `GET <base>/zones` | Every zone and its state: `{ zones }` ([below](#zones-and-their-state)) |
 | | `POST <base>/zones/<zone>/stop` | [Stops](#stopping-a-zone) the zone: its URLs answer 404, it stays installed. 200 `{ name, version, state, changed, ms }` |
 | | `POST <base>/zones/<zone>/resume` | Resumes it: the version it has installed serves again, with no install. 200, as for stop |
@@ -255,6 +255,30 @@ The path's first segment is walked in a trie by character code, so a path no sto
 first character. Matching every alias's pattern instead, the first version, cost 367 ns with one zone stopped and
 2.7 µs with ten. What remains is a map lookup per character of the first segment and the alias patterns of a segment
 that does match.
+
+## Rolling deploys
+
+A live install changes a zone inside one process. A deploy of a new image replaces the process, and two things make
+that invisible to users: a proxy in front of more than one Zones for the time of the swap, and a stop that drains.
+
+- **A stop drains.** On `SIGTERM` or `SIGINT`, `next-zones serve` (and `start`) stops taking connections, answers the
+  requests it has with `Connection: close`, answers `<base>/health` with 503, ends the open tabs' event streams with
+  `retry: 1000`, then exits 0. `--drain-timeout <ms>` (`NEXT_ZONES_DRAIN_TIMEOUT_MS`, 25 000 by default) bounds the
+  wait; requests still running then have their connections closed. Give the supervisor a longer grace than that
+  (compose: `stop_grace_period: 30s`), or it kills the process mid-drain. From code: `await zones.drain({ timeoutMs })`.
+- **The proxy retries what is safe.** A connection the leaving process refuses was never sent, so a proxy may send any
+  request to the other process; a request that failed after it was sent is retried only when it is idempotent. nginx:
+  the processes as servers of one `upstream`, `proxy_next_upstream error timeout http_502 http_503` (nginx never sends
+  a POST twice unless told `non_idempotent`).
+- **Two versions serve for a moment.** While the old process drains and the new one serves, a page from one may ask the
+  other for a chunk it does not have. Let the proxy try the other process on a 404 under `/_next/static/`.
+- **Open tabs follow.** Each events stream begins with `event: hello` and an opaque value naming the shell's build and
+  each zone's version and build. `<ZoneUpdates />` keeps the first, and when a reconnection brings another one (the
+  new process serves something else) it refreshes as on a swap; the same image again changes nothing.
+- **What is not shared.** Two Zones processes share nothing at run time: each has its store (with its `state.json`,
+  the live installs since boot), its cache directory and its pid file. Give each its own; a store shared by two would
+  have both write `state.json`. A version installed live on one is not on the other: install it on each, or deploy it
+  in the image.
 
 ## What a user notices
 

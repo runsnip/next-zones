@@ -41,6 +41,7 @@ function createContext(options) {
     fsCheckers: new Set(),            // the router server's file-system checks
     lrus: new Set(),                  // every LRU Next creates (cached misses live there)
     listeners: new Set(),             // open tabs listening to <base>/events
+    draining: false,                  // drain() began: no keep-alive, health answers 503, no new connections
     policy: options.policy ?? {},     // the instrumentation policy
 
     /* Benchmark only: synthetic pages added to the shell's manifest, to measure at a real app's size. */

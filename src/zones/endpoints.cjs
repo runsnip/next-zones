@@ -3,8 +3,8 @@
  * The URLs Zones serves of its own: none unless the shell declares them (zoneConfig({ mount: "/", endpoints })), or
  * createZones({ endpoints }) does (false: none). All under one base path, "/_next-zones" unless changed:
  *
- *   events  GET  <base>/events                         swap events for <ZoneUpdates />, public
- *   health  GET  <base>/health                         200 once Zones serves; details for an admin
+ *   events  GET  <base>/events                         swap events for <ZoneUpdates />, public; `hello` first
+ *   health  GET  <base>/health                         200 once Zones serves (503 while it drains); details for an admin
  *   metrics GET  <base>/metrics                        Prometheus text, to an admin, with zoneConfig({ metrics: true })
  *   admin   GET  <base>/zones                           every zone and its state: serving, stopped, failed, available
  *           POST <base>/zones/<zone>/stop               stops a zone: its URLs answer 404, it stays installed
@@ -120,9 +120,25 @@ function createEndpoints(ctx, { installer, collector, bench, debugInfo }) {
     return json(res, 404, { error: "not found" });
   }
 
+  /* What this process serves, as one opaque value: the shell's build and every installed zone's version and build. A
+     tab is sent it as it connects (`hello`), and a tab that reconnects to a process serving something else (another
+     deploy: a rolling restart replaces the process, which no swap event announces) refreshes as on a swap. */
+  let shellBuild = null;
+  function fingerprint() {
+    shellBuild ??= (() => { try { return fs.readFileSync(path.join(ctx.shell, ".next", "BUILD_ID"), "utf8").trim(); } catch { return ""; } })();
+    const zones = [];
+    for (const [state, map] of [["serving", ctx.zones], ["stopped", ctx.stopped]]) {
+      for (const z of map.values()) zones.push(`${z.name}@${z.version}#${z.buildId ?? ""}:${state}`);
+    }
+    return require("node:crypto").createHash("sha256").update([shellBuild, ...zones.sort()].join("\n")).digest("base64url").slice(0, 22);
+  }
+
   function events(req, res) {
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache, no-transform", connection: "keep-alive" });
     res.write(": next-zones\n\n");
+    /* Leaving (drain): the tab is told to come back in a second, to a process that stays. */
+    if (ctx.draining) return void res.end("retry: 1000\n\n");
+    res.write(`event: hello\ndata: ${fingerprint()}\n\n`);
     ctx.listeners.add(res);
     const keepAlive = setInterval(() => res.write(": ping\n\n"), 25_000);   // keeps proxies from closing it
     req.on("close", () => { clearInterval(keepAlive); ctx.listeners.delete(res); });
@@ -142,6 +158,9 @@ function createEndpoints(ctx, { installer, collector, bench, debugInfo }) {
   /* Health, for a supervisor (Docker's HEALTHCHECK): 200 once Zones serves. A zone that failed at boot does not make it
      unhealthy, since a restart would not fix its build: it is reported as degraded. Details only to an admin. */
   function health(req, res) {
+    /* Draining: still answering the requests it has, taking no more; a supervisor or a proxy checking health stops
+       sending it any. */
+    if (ctx.draining) return json(res, 503, { ok: false, draining: true });
     const now = status();
     if (!authorized(req)) return json(res, 200, { ok: true, degraded: now.degraded });
     return json(res, 200, now);

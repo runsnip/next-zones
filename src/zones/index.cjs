@@ -117,16 +117,20 @@ function createZones(options = {}) {
   const server = createServer(ctx, { assets, installer, bench, collector });
   let httpServer = null;
 
-  return {
+  const zones = {
     /** Prepares the shell, installs the pinned and saved versions, and starts serving; resolves once listening. */
     async listen(port = 3000, hostname = "0.0.0.0") {
       claimStore(ctx.store);
       await server.prepare(port, hostname);
       await installer.restore();
-      httpServer = http.createServer((req, res) => server.handleRequest(req, res).catch((error) => {
+      httpServer = http.createServer((req, res) => {
+        /* Draining: every response closes its connection, so a proxy holds no kept-alive one to a process leaving. */
+        if (ctx.draining) res.shouldKeepAlive = false;
+        return server.handleRequest(req, res).catch((error) => {
         console.error(error);
         if (!res.headersSent) res.writeHead(500, { "content-type": "application/json" }).end('{"failed":"next-zones: internal error"}');
-      }));
+        });
+      });
       await new Promise((resolve) => httpServer.listen(port, hostname, resolve));
       return httpServer;
     },
@@ -150,13 +154,46 @@ function createZones(options = {}) {
     stop: (name) => installer.stop(name),
     /** Resumes a stopped zone: the build it had serves again, with no install. */
     resume: (name) => installer.resume(name),
-    async close() {
-      for (const res of ctx.listeners) res.end();
-      await new Promise((resolve) => (httpServer ? httpServer.close(resolve) : resolve()));
+    /**
+     * Stops serving without failing a request (drain): stops accepting connections, ends the open tabs' event streams
+     * (they reconnect, through the proxy, to a Zones still serving), closes idle kept-alive connections, lets the
+     * requests in flight finish with `Connection: close`, then closes Next. `timeoutMs`: how long in-flight requests
+     * may take before their connections are closed (default: no limit). Resolves with what it waited for.
+     */
+    close: (options) => drain(options),
+    drain: (options) => drain(options),
+  };
+
+  let drained = null;
+  function drain({ timeoutMs = Infinity } = {}) {
+    if (drained) return drained;
+    ctx.draining = true;
+    drained = (async () => {
+      const started = performance.now();
+      const streams = ctx.listeners.size;
+      const closed = new Promise((resolve) => (httpServer ? httpServer.close(() => resolve(true)) : resolve(true)));
+      /* `retry`: the tab's EventSource reconnects after 1 s (its default is the browser's, 3 s in Chrome). */
+      for (const res of ctx.listeners) { res.write("retry: 1000\n\n"); res.end(); }
+      /* server.close() closes the connections idle now; a request that ends later leaves its connection idle again
+         (a proxy's keep-alive without Connection: close, when the response began before the drain): closed as it does. */
+      const idle = httpServer ? setInterval(() => httpServer.closeIdleConnections(), 50) : null;
+      httpServer?.closeIdleConnections();
+      let timer = null;
+      const outcome = await Promise.race([
+        closed,
+        ...(Number.isFinite(timeoutMs) ? [new Promise((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); })] : []),
+      ]);
+      clearTimeout(timer);
+      clearInterval(idle);
+      if (!outcome) httpServer.closeAllConnections();
       await server.close();
       releaseStore(ctx.store);
-    },
-  };
+      return { streams, ms: Math.round(performance.now() - started), timedOut: !outcome };
+    })();
+    return drained;
+  }
+
+  return zones;
 }
 
 module.exports = { createZones };

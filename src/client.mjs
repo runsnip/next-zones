@@ -31,8 +31,13 @@ export function ZoneUpdates({ endpoint = "/_next-zones/events" }) {
     const pages = typeof window !== "undefined" && window.__NEXT_DATA__ && window.next?.router;
     const onSwap = pages ? () => navigateWithNewDocuments(pages) : () => router.refresh();
     events.addEventListener("swap", onSwap);
+    /* Each connection begins with what the process serves: a reconnection to another one (a deploy replaced it) that
+       serves something else is a swap the tab was not told of. */
+    let serving = null;
+    const onHello = (event) => { if (serving !== null && event.data !== serving) onSwap(); serving = event.data; };
+    events.addEventListener("hello", onHello);
     events.onerror = () => { if (events.readyState === EventSource.CLOSED) events.close(); };
-    return () => { events.removeEventListener("swap", onSwap); events.close(); };
+    return () => { events.removeEventListener("swap", onSwap); events.removeEventListener("hello", onHello); events.close(); };
   }, [endpoint, router]);
   return null;
 }

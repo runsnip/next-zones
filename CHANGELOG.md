@@ -7,6 +7,14 @@ What changed in each version of `@runsnip/next-zones` on npm. The versions follo
 
 ### Added
 
+- **Zones: a stop drains.** `next-zones serve` and `start` drain on `SIGTERM` or `SIGINT` (`docker stop`, a rolling
+  deploy): no new connection is taken, the requests in flight are answered with `Connection: close`, `<base>/health`
+  answers `503`, and the open tabs' event streams end with `retry: 1000`, so they reconnect through the proxy to a Zones
+  that stays; then it exits 0. `--drain-timeout` (or `NEXT_ZONES_DRAIN_TIMEOUT_MS`, 25 s by default) bounds the wait.
+  `zones.drain({ timeoutMs })` does the same from code; `zones.close()` is it. Before, a stop cut what was in flight.
+- **Zones: a tab learns that a deploy replaced the process.** Every `<base>/events` stream begins with a `hello` event
+  naming what the process serves (the shell's build, each zone's version and build); `<ZoneUpdates />` refreshes, as
+  on a swap, when it reconnects to a process serving something else. See [rolling deploys](docs/zones.md#rolling-deploys).
 - **Zones: a zone's public files, precompressed.** A file with a `.br` or `.gz` sibling (`fonts/a.ttf.br`) is sent as
   that sibling when the request's `Accept-Encoding` allows it (q-values read, brotli first on a tie), with
   `Content-Encoding`, the original's `Content-Type`, the sibling's `Content-Length` and `Vary: Accept-Encoding`. A
