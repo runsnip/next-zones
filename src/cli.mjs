@@ -242,6 +242,12 @@ async function serve() {
      limit: --drain-timeout (ms, NEXT_ZONES_DRAIN_TIMEOUT_MS), 25 s by default, under Docker's and compose's grace.
      Before it serves there is nothing to drain: it exits at once. A second signal exits at once too. */
   const drainTimeout = wholeNumber(flag("drain-timeout", process.env.NEXT_ZONES_DRAIN_TIMEOUT_MS ?? "25000"), "--drain-timeout");
+  /* --drain-linger (ms, NEXT_ZONES_DRAIN_LINGER_MS, 0 by default): how long it stays after the drain, refusing
+     connections, before it exits. Behind a proxy that balances over several Zones by a name (nginx `resolve`), the
+     exit takes the address away, and a connection the proxy opens to it after that is never refused, only lost (a
+     connect timeout); while it lingers, a refusal marks it down there (max_fails), so the proxy has stopped sending it
+     anything by the time it goes. */
+  const drainLinger = wholeNumber(flag("drain-linger", process.env.NEXT_ZONES_DRAIN_LINGER_MS ?? "0"), "--drain-linger");
   let server = null, listening = false, stopping = false;
   for (const signal of ["SIGTERM", "SIGINT"]) {
     process.on(signal, () => {
@@ -249,7 +255,10 @@ async function serve() {
       stopping = true;
       console.log(`next-zones: ${signal}, draining (at most ${drainTimeout} ms)`);
       server.drain({ timeoutMs: drainTimeout }).then(
-        (r) => { console.log(`next-zones: drained in ${r.ms} ms (${r.streams} event streams ended${r.timedOut ? ", requests still in flight closed" : ""})`); process.exit(0); },
+        (r) => {
+          console.log(`next-zones: drained in ${r.ms} ms (${r.streams} event streams ended${r.timedOut ? ", requests still in flight closed" : ""})${drainLinger ? `, exiting in ${drainLinger} ms` : ""}`);
+          setTimeout(() => process.exit(0), drainLinger);
+        },
         (error) => { console.error(error); process.exit(1); });
     });
   }

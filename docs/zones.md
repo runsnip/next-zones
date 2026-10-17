@@ -266,6 +266,11 @@ that invisible to users: a proxy in front of more than one Zones for the time of
   `retry: 1000`, then exits 0. `--drain-timeout <ms>` (`NEXT_ZONES_DRAIN_TIMEOUT_MS`, 25 000 by default) bounds the
   wait; requests still running then have their connections closed. Give the supervisor a longer grace than that
   (compose: `stop_grace_period: 30s`), or it kills the process mid-drain. From code: `await zones.drain({ timeoutMs })`.
+- **It leaves after the proxy has stopped sending.** In a container, the exit takes the address away with it: a
+  connection opened to it after that is not refused but lost, until the proxy's connect timeout. `--drain-linger <ms>`
+  (`NEXT_ZONES_DRAIN_LINGER_MS`) keeps the process refusing connections that long after the drain, so a proxy that
+  marks a server down on one refusal (nginx: `max_fails=1 fail_timeout=10s`) has stopped using it before it goes; a
+  short connect timeout (nginx: `proxy_connect_timeout 1s`) bounds what is left.
 - **The proxy retries what is safe.** A connection the leaving process refuses was never sent, so a proxy may send any
   request to the other process; a request that failed after it was sent is retried only when it is idempotent. nginx:
   the processes as servers of one `upstream`, `proxy_next_upstream error timeout http_502 http_503` (nginx never sends
