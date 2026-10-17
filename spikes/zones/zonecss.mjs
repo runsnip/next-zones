@@ -4,7 +4,9 @@
  * renders a soft navigation from below the root and leaves the root's stylesheets out: before the fix, the zone
  * reached from the shell had only the shell's stylesheet, and the shell reached back from a zone loaded directly had
  * only the zone's. Checked: the shell → the zone (softly), the zone → the shell (softly, from a direct load of the
- * zone), and a direct load of each; a style is read from the element it applies to.
+ * zone), and a direct load of each; a style is read from the element it applies to. The same between dynamic pages of
+ * server components only (the shell's /about, the zone's /wide/plain), which have no entry of their own in their
+ * client reference manifest.
  */
 import { createRequire } from "node:module";
 
@@ -36,6 +38,19 @@ const m2 = await marker();
 await page.click('nav a[href="/"]');
 seen.shellSoft = await color("shell-styled");
 seen.shellSoftSameDocument = (await marker()) === m2;
+await page.goto(`${BASE}/about`);
+seen.plainShellDirect = await color("shell-styled");
+await page.goto(`${BASE}/`);
+const m3 = await marker();
+await page.click("#to-wide-plain");
+seen.plainZoneSoft = await color("wide-styled");
+seen.plainZoneSoftSameDocument = (await marker()) === m3;
+await page.goto(`${BASE}/wide/plain`);
+seen.plainZoneDirect = await color("wide-styled");
+const m4 = await marker();
+await page.click("#to-about");
+seen.plainShellSoft = await color("shell-styled");
+seen.plainShellSoftSameDocument = (await marker()) === m4;
 await browser.close();
 
 const SHELL = "rgb(1, 2, 3)", ZONE = "rgb(4, 5, 6)";
@@ -45,7 +60,9 @@ if (seen.shellDirect !== SHELL) wrong.shellDirect = seen.shellDirect;
 if (seen.zoneDirect !== ZONE) wrong.zoneDirect = seen.zoneDirect;
 if (seen.zoneSoft !== ZONE) wrong.zoneSoft = seen.zoneSoft;
 if (seen.shellSoft !== SHELL) wrong.shellSoft = seen.shellSoft;
-if (!seen.zoneSoftSameDocument || !seen.shellSoftSameDocument) wrong.soft = "a navigation was not soft: the check does not test what it says";
+for (const key of ["plainShellDirect", "plainShellSoft"]) if (seen[key] !== SHELL) wrong[key] = seen[key];
+for (const key of ["plainZoneDirect", "plainZoneSoft"]) if (seen[key] !== ZONE) wrong[key] = seen[key];
+if (!seen.zoneSoftSameDocument || !seen.shellSoftSameDocument || !seen.plainZoneSoftSameDocument || !seen.plainShellSoftSameDocument) wrong.soft = "a navigation was not soft: the check does not test what it says";
 if (errors.length) wrong.errors = errors;
 console.log(JSON.stringify({ seen, wrong }, null, 2));
 if (Object.keys(wrong).length) process.exit(1);

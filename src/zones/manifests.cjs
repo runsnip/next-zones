@@ -73,7 +73,7 @@ function createManifests(ctx) {
     if (!copy) {
       const change = { idMap, chunkUrls: urls, mainChunks: zone.mainChunks ?? [] };
       const plain = !change.mainChunks.length && !Object.keys(idMap).length;
-      const manifests = Object.fromEntries(Object.entries(value.__RSC_MANIFEST).map(([page, manifest]) => [page, plain ? rootCssBelow(manifest) : clientManifestForZone(manifest, change)]));
+      const manifests = Object.fromEntries(Object.entries(value.__RSC_MANIFEST).map(([page, manifest]) => [page, plain ? rootCssBelow(manifest, page) : clientManifestForZone(manifest, change, page)]));
       copy = { ...value, __RSC_MANIFEST: manifests };
       augmented.set(value, copy);
     }
@@ -88,7 +88,7 @@ function createManifests(ctx) {
     if (!value?.__RSC_MANIFEST) return value;
     let copy = augmented.get(value);
     if (!copy) {
-      copy = { ...value, __RSC_MANIFEST: Object.fromEntries(Object.entries(value.__RSC_MANIFEST).map(([page, manifest]) => [page, rootCssBelow(manifest)])) };
+      copy = { ...value, __RSC_MANIFEST: Object.fromEntries(Object.entries(value.__RSC_MANIFEST).map(([page, manifest]) => [page, rootCssBelow(manifest, page)])) };
       augmented.set(value, copy);
     }
     return copy;

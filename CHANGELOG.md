@@ -38,8 +38,13 @@ What changed in each version of `@runsnip/next-zones` on npm. The versions follo
   the root and left the root layout's stylesheets out (a zone's `globals.css`, say): only a full load had them. The
   root layout's stylesheets are now named by the segments below it too: in each route's client reference manifest (the
   shell's and the zones'), and in the flight data and segments of a page prerendered before, as Zones reads them from
-  its cache (and as `mode: "single"` and `output: "export"` link them). A stylesheet stays loaded after the navigation
-  away, as Next keeps a layout's.
+  its cache (and as `mode: "single"` and `output: "export"` link them). A page with no stylesheet and no client code of
+  its own (a dynamic page of server components only) has no entry in its manifest: it is named by its module path, as
+  Next looks it up, with the files that render around it (its layouts, not-found, error, loading). A stylesheet stays
+  loaded after the navigation away, as Next keeps a layout's.
+- **A build for Zones in a folder whose `node_modules` is linked from elsewhere**: the project root `zoneConfig` pins is
+  found when the two share only the filesystem's root (a workspace in `/tmp`, its `node_modules` in `/home`). Before,
+  the search for it never ended, and the build hung.
 
 ## 0.1.1 (2026-10-11)
 

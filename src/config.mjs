@@ -182,7 +182,8 @@ export function projectRoot(from = process.cwd()) {
       /* A node_modules linked from elsewhere must stay inside the root: the nearest folder holding both. */
       const real = path.dirname(fs.realpathSync(path.join(dir, "node_modules")));
       let root = fs.realpathSync(dir);
-      while (real !== root && !real.startsWith(root + path.sep)) root = path.dirname(root);
+      /* Up to the filesystem's root at most, which holds both (a workspace in /tmp linking a node_modules in /home). */
+      while (real !== root && !real.startsWith(root + path.sep) && path.dirname(root) !== root) root = path.dirname(root);
       return root;
     }
     if (path.dirname(dir) === dir) return path.resolve(from);

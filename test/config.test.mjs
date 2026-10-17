@@ -4,6 +4,7 @@ import { zoneConfig, checkZone, readZone, BUILD_OPTIONS, projectRoot } from "../
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 test("zoneConfig leaves the zone's Next config untouched outside a build for Zones, and attaches the declaration", () => {
   const nextConfig = { reactStrictMode: true, output: "standalone", experimental: { other: 1, turbopackRemoveUnusedExports: true } };
@@ -141,6 +142,14 @@ test("the pinned root holds a node_modules linked from elsewhere", () => {
   try {
     assert.equal(projectRoot(other), bed);
     assert.equal(projectRoot(outside), top);
+    /* Linked from a folder that may share only the filesystem's root with it (this package's node_modules): the
+       nearest folder holding both, that root at most (before, the search never ended). */
+    const far = path.join(top, "far");
+    fs.mkdirSync(far); fs.symlinkSync(fileURLToPath(new URL("../node_modules", import.meta.url)), path.join(far, "node_modules"));
+    if (fs.existsSync(path.join(far, "node_modules", "next", "package.json"))) {
+      const root = projectRoot(far), real = path.dirname(fs.realpathSync(path.join(far, "node_modules")));
+      assert.ok(real.startsWith(root) && top.startsWith(root), root);
+    }
   } finally { fs.rmSync(top, { recursive: true, force: true }); }
 });
 

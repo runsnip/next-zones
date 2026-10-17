@@ -43,6 +43,20 @@ test("a zone's manifest made for the shell's document moves them too; one withou
   assert.equal(rootCssBelow(plain), plain);
 });
 
+test("a page with no entry of its own (server components only) is named by its module path, and what renders around it", () => {
+  const only = { entryCSSFiles: { "[project]/shell/app/layout": [css("root")] }, entryJSFiles: {} };
+  const out = rootCssBelow(only, "/(group)/live/page").entryCSSFiles;
+  assert.deepEqual(out["[project]/shell/app/layout"], []);
+  assert.deepEqual(out["[project]/shell/app/(group)/live/page"], [css("root")]);
+  assert.deepEqual(out["[project]/shell/app/(group)/live/not-found"], [css("root")]);
+  assert.deepEqual(out["[project]/shell/app/(group)/layout"], [css("root")]);
+  assert.deepEqual(out["[project]/shell/app/template"], [css("root")]);
+  assert.equal(out["[project]/shell/app/page"], undefined);
+  /* A route handler names none; clientManifestForZone passes the page on. */
+  assert.deepEqual(Object.keys(rootCssBelow(only, "/api/route").entryCSSFiles), ["[project]/shell/app/layout"]);
+  assert.deepEqual(clientManifestForZone(only, {}, "/live/page").entryCSSFiles["[project]/shell/app/live/page"], [css("root")]);
+});
+
 /* payload.cjs withRootCss: the same, done to a page prerendered before (its flight data and its segments). */
 const { withRootCss } = require("../src/zones/payload.cjs");
 const link = (href) => ["$", "link", "0", { rel: "stylesheet", href, precedence: "next", crossOrigin: "$undefined", nonce: "$undefined" }];

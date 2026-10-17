@@ -7,7 +7,7 @@
  *   ids where the old ones were.
  * - The root layout's stylesheets named by the segments below it (rootCssBelow).
  */
-function clientManifestForZone(manifest, { idMap = {}, chunkUrls = {}, mainChunks = [] }) {
+function clientManifestForZone(manifest, { idMap = {}, chunkUrls = {}, mainChunks = [] }, page) {
   const chunksOf = (list) => [...mainChunks.filter((c) => !list.includes(c)), ...list.map((c) => chunkUrls[c] ?? c)];
   const withMain = (entry) => ({ ...entry, id: idMap[entry.id] ?? entry.id, chunks: chunksOf(entry.chunks) });
   const withNewIds = (mapping) => {
@@ -23,7 +23,7 @@ function clientManifestForZone(manifest, { idMap = {}, chunkUrls = {}, mainChunk
     edgeSSRModuleMapping: withNewIds(manifest.edgeSSRModuleMapping),
     rscModuleMapping: withNewIds(manifest.rscModuleMapping),
     edgeRscModuleMapping: withNewIds(manifest.edgeRscModuleMapping),
-    entryCSSFiles: rootCssBelow(manifest).entryCSSFiles,
+    entryCSSFiles: rootCssBelow(manifest, page).entryCSSFiles,
     entryJSFiles: Object.fromEntries(Object.entries(manifest.entryJSFiles ?? {}).map(([key, files]) => [key, files.map((f) => (chunkUrls[`/_next/${f}`] ?? `/_next/${f}`).slice("/_next/".length))])),
   };
 }
@@ -38,13 +38,24 @@ function clientManifestForZone(manifest, { idMap = {}, chunkUrls = {}, mainChunk
  * rendered, on a soft navigation and on a load; React hoists it into the head and keeps it, as Next keeps a layout's
  * stylesheets after leaving it. The root keeps none, so it does not count them as loaded. The root layout is the
  * shortest `…/app/layout` entry.
+ * A module with no stylesheet and no client code of its own has no entry (a page of server components only, say):
+ * given the manifest's page ("/live/page"), the page and the files that may render in its place or around it, at
+ * every segment from the root down to it, are named too, by their module path without extension as Next looks them
+ * up (getLinkAndScriptTags). Else a dynamic page, rendered with this manifest, had no root stylesheet at all.
  */
-function rootCssBelow(manifest) {
+const AROUND = ["layout", "template", "not-found", "forbidden", "unauthorized", "error", "loading"];
+function rootCssBelow(manifest, page) {
   const css = manifest?.entryCSSFiles;
   if (!css) return manifest;
   const root = Object.keys(css).filter((k) => /(^|\/)app\/layout$/.test(k) && !k.includes("/node_modules/")).sort((a, b) => a.length - b.length)[0];
   if (!root || !css[root]?.length) return manifest;
-  const moved = Object.fromEntries(Object.entries(css).map(([key, files]) => {
+  const keys = new Set(Object.keys(css));
+  if (typeof page === "string" && page.endsWith("/page")) {
+    const dirs = page.slice(1, -"page".length).split("/").filter(Boolean), prefix = root.slice(0, -"layout".length);
+    for (let i = 0; i <= dirs.length; i++) for (const name of i < dirs.length ? AROUND : [...AROUND, "page"]) keys.add(prefix + [...dirs.slice(0, i), name].join("/"));
+  }
+  const moved = Object.fromEntries([...keys].map((key) => {
+    const files = css[key] ?? [];
     if (key === root) return [key, []];
     const paths = new Set(files.map((f) => f.path));
     return [key, [...css[root].filter((f) => !paths.has(f.path)), ...files]];

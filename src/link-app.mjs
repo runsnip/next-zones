@@ -96,7 +96,7 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
     const sandbox = { globalThis: {} };
     new Function("globalThis", fs.readFileSync(file, "utf8"))(sandbox.globalThis);
     const entries = Object.entries(sandbox.globalThis.__RSC_MANIFEST ?? {});
-    fs.writeFileSync(file, `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};\n${entries.map(([key, value]) => `globalThis.__RSC_MANIFEST[${JSON.stringify(key)}] = ${JSON.stringify(rootCssBelow(value))};`).join("\n")}\n`);
+    fs.writeFileSync(file, `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};\n${entries.map(([key, value]) => `globalThis.__RSC_MANIFEST[${JSON.stringify(key)}] = ${JSON.stringify(rootCssBelow(value, key))};`).join("\n")}\n`);
   });
   const appPaths = readJson(path.join(server, "app-paths-manifest.json"), {});
   const appPathRoutes = readJson(path.join(dist, "app-path-routes-manifest.json"), {});
@@ -179,7 +179,7 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
         const entries = Object.entries(sandbox.globalThis.__RSC_MANIFEST ?? {});
         const target = path.join(server, "app", `${page}_client-reference-manifest.js`);
         fs.mkdirSync(path.dirname(target), { recursive: true });
-        fs.writeFileSync(target, `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};\n${entries.map(([key, value]) => `globalThis.__RSC_MANIFEST[${JSON.stringify(key)}] = ${JSON.stringify(clientManifestForZone(value, change))};`).join("\n")}\n`);
+        fs.writeFileSync(target, `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};\n${entries.map(([key, value]) => `globalThis.__RSC_MANIFEST[${JSON.stringify(key)}] = ${JSON.stringify(clientManifestForZone(value, change, key))};`).join("\n")}\n`);
       }
       const pageManifests = path.join(dir, "server", "app", page);
       if (fs.existsSync(pageManifests) && fs.statSync(pageManifests).isDirectory()) {
@@ -205,7 +205,7 @@ export async function linkApp({ shellDir, images, out, policy = {}, into = false
         const sandbox = { globalThis: {} };
         new Function("globalThis", fs.readFileSync(manifestFile, "utf8"))(sandbox.globalThis);
         const entries = Object.entries(sandbox.globalThis.__RSC_MANIFEST ?? {});
-        fs.writeFileSync(manifestFile, `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};\n${entries.map(([key, value]) => `globalThis.__RSC_MANIFEST[${JSON.stringify(key)}] = ${JSON.stringify(clientManifestForZone(value, change))};`).join("\n")}\n`);
+        fs.writeFileSync(manifestFile, `globalThis.__RSC_MANIFEST = globalThis.__RSC_MANIFEST || {};\n${entries.map(([key, value]) => `globalThis.__RSC_MANIFEST[${JSON.stringify(key)}] = ${JSON.stringify(clientManifestForZone(value, change, key))};`).join("\n")}\n`);
       }
     }
     /* Its prerendered pages, where Next reads them, made to run in the shell's document. */
