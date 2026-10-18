@@ -48,6 +48,7 @@ const rewritten = new Set(chunks.filter((c) => RENAMED.test(c)));
 /* Every chunk written again, by its old name (Zones' debug info): none may be fetched under that name. */
 const renamedFrom = new Set(Object.keys((await (await fetch(`${BASE}/_next-zones/debug`)).json()).chunkUrls?.wide ?? {}).map((u) => u.split("/").pop()));
 const oldNames = [...new Set(chunks.filter((c) => renamedFrom.has(c)))];
+const workerRuntime = [...rewritten].filter((c) => c.startsWith("turbopack-"));
 const wrong = {};
 if (!renamedFrom.size) wrong.chunkMap = "Zones' debug info lists no chunk of wide written again: the check does not test what it says";
 if (!installed.ok) wrong.install = installed.status;
