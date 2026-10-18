@@ -560,7 +560,7 @@ Prerender: a `'use cache'` value tagged `notes` in the static shell, and a dynam
    The one that differs is the badge.
 3. **New ids.** A differing module, and its importers the browser may hold, get new ids, derived from the zone build
    and the old id.
-   - The zone's chunks holding them are written again under new URLs (`…-z<build>.js`).
+   - The zone's chunks holding them are written again under new URLs (`…-z<content key>.js`: same bytes, same name, across zones).
    - Its client reference manifests (ids, chunk URLs, the SSR/RSC mappings) and its seeded payloads (`I[…]` rows,
      chunk URLs) point at them.
 4. **What a module requires counts by what it is, not by its id.**

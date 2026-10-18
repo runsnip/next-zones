@@ -44,13 +44,13 @@ test("a worker's runtime chunk is written again with its chunks' new names, and 
     const result = await analyse({ dist, shellDist, known: null, outDir, buildKey: "0123456789abcdef", urlPrefix: "/_next/" });
 
     assert.equal(result.idMap["912598"], 12598);
-    const renamed = (f) => `static/chunks/${f.replace(/\.js$/, "-z01234567.js")}`;
-    for (const f of ["w.js", "turbopack-w1.js", "page.js"]) assert.equal(result.chunkMap[`static/chunks/${f}`], renamed(f), f);
+    const renamed = (f) => result.chunkMap[`static/chunks/${f}`];
+    for (const f of ["w.js", "turbopack-w1.js", "page.js"]) assert.match(renamed(f) ?? "", new RegExp(`^static/chunks/${f.replace(/\.js$/, "")}-z[0-9a-f]{8}\\.js$`), f);
     assert.equal(result.chunkMap["static/chunks/turbopack-worker-x.js"], undefined, "the bootstrap names no chunk");
-    const runtime = fs.readFileSync(path.join(outDir, "turbopack-w1-z01234567.js"), "utf8");
-    assert.match(runtime, /otherChunks:\["static\/chunks\/w-z01234567\.js"\],runtimeModuleIds:\[900001\]/);
-    const page = fs.readFileSync(path.join(outDir, "page-z01234567.js"), "utf8");
-    assert.ok(page.includes(`["static/chunks/w-z01234567.js","static/chunks/turbopack-w1-z01234567.js"]`), page);
+    const runtime = fs.readFileSync(path.join(outDir, path.basename(renamed("turbopack-w1.js"))), "utf8");
+    assert.ok(runtime.includes(`otherChunks:["${renamed("w.js")}"],runtimeModuleIds:[900001]`), runtime);
+    const page = fs.readFileSync(path.join(outDir, path.basename(renamed("page.js"))), "utf8");
+    assert.ok(page.includes(`["${renamed("w.js")}","${renamed("turbopack-w1.js")}"]`), page);
     /* No file the browser may load names a chunk by the name it no longer has. */
     for (const f of fs.readdirSync(outDir)) {
       const text = fs.readFileSync(path.join(outDir, f), "utf8");
@@ -98,6 +98,40 @@ test("a module an earlier zone holds under a wider id is the same module (Admin 
     assert.equal(second.idMap["92719"], undefined);
     assert.deepEqual(second.chunkMap, {});
     assert.deepEqual({ sameCode: second.shared.sameCode, sameId: second.shared.sameId, differ: second.shared.differ }, { sameCode: 2, sameId: 2, differ: [] });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a chunk two zones write again the same way has one name (same bytes, same name); one written differently, its own", { skip }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nz-samename-"));
+  fs.symlinkSync(SPIKE_MODULES, path.join(root, "node_modules"));
+  try {
+    const shellDist = build(root, "shell", { "main.js": PUSH(`12598,(e)=>{e.v("shared")},23456,(e)=>{e.v(1)}`) }, ["static/chunks/main.js"]);
+    /* Both zones: shared.js (a package's chunk, the shell's module under a wider id: aliased, so written again), and
+       a.js and b.js, which load each other and shared.js lazily. Each zone's own page differs. */
+    const common = {
+      "shared.js": PUSH(`912598,(e)=>{e.v("shared")},933333,(e)=>{let n=e.i(912598);e.v(n)}`),
+      "a.js": PUSH(`944444,(e)=>{e.v(t=>Promise.all(["static/chunks/b.js","static/chunks/shared.js"].map(t=>e.l(t))).then(()=>t(955555)))}`),
+      "b.js": PUSH(`955555,(e)=>{e.v(t=>Promise.all(["static/chunks/a.js"].map(t=>e.l(t))).then(()=>t(944444)))},966666,(e)=>{let n=e.i(912598);e.v(n)}`),
+    };
+    const one = build(root, "one", { ...common, "page.js": PUSH(`900001,(e)=>{e.v(e.i(933333))}`) }, ["static/chunks/page.js"]);
+    const two = build(root, "two", { ...common, "page.js": PUSH(`900002,(e)=>{e.v([e.i(933333),2])}`) }, ["static/chunks/page.js"]);
+    const first = await analyse({ dist: one, shellDist, known: null, outDir: path.join(root, "out-one"), buildKey: "0123456789abcdef", urlPrefix: "/_next/" });
+    const second = await analyse({ dist: two, shellDist, known: null, outDir: path.join(root, "out-two"), buildKey: "fedcba9876543210", urlPrefix: "/_next/" });
+    const bytes = (result, dir, f) => fs.readFileSync(path.join(root, dir, path.basename(result.chunkMap[`static/chunks/${f}`])), "utf8");
+    for (const f of ["shared.js", "a.js", "b.js"]) {
+      assert.ok(first.chunkMap[`static/chunks/${f}`], `${f} written again`);
+      assert.equal(first.chunkMap[`static/chunks/${f}`], second.chunkMap[`static/chunks/${f}`], `${f}: one name in both zones`);
+      assert.equal(bytes(first, "out-one", f), bytes(second, "out-two", f), `${f}: the same bytes under it`);
+    }
+    assert.notEqual(first.chunkMap["static/chunks/a.js"], first.chunkMap["static/chunks/b.js"]);
+    assert.equal(first.chunkMap["static/chunks/page.js"], undefined, "a page requiring no remapped module keeps its name");
+    /* A zone whose shared.js is written with another id: another name, and so another for what names it. */
+    const three = build(root, "three", { ...common, "shared.js": PUSH(`912598,(e)=>{e.v("shared")},933333,(e)=>{let n=e.i(912598);e.v([n])}`), "page.js": PUSH(`900001,(e)=>{e.v(e.i(933333))}`) }, ["static/chunks/page.js"]);
+    const third = await analyse({ dist: three, shellDist, known: null, outDir: path.join(root, "out-three"), buildKey: "0123456789abcdef", urlPrefix: "/_next/" });
+    assert.notEqual(third.chunkMap["static/chunks/shared.js"], first.chunkMap["static/chunks/shared.js"]);
+    assert.notEqual(third.chunkMap["static/chunks/a.js"], first.chunkMap["static/chunks/a.js"], "a.js names shared.js");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

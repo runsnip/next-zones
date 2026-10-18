@@ -39,19 +39,14 @@ await page.waitForSelector("#load-lazy", { timeout: 15000 });
 const direct = await loadCard();
 await browser.close();
 
-/* A chunk written again is <name>-z<build key>.js: its old name must never be fetched. Every chunk fetched under a
-   plain name is asked for under the new name too: Zones serves it only if it was written again. */
+/* A chunk written again is <name>-z<content key>.js: its old name must never be fetched. */
 const RENAMED = /-z([0-9a-f]{8})\.js$/;
 const rewritten = new Set(chunks.filter((c) => RENAMED.test(c)));
-const keys = new Set([...rewritten].map((c) => RENAMED.exec(c)[1]));
-const oldNames = [];
-for (const c of new Set(chunks.filter((c) => !RENAMED.test(c)))) {
-  for (const key of keys) {
-    const r = await fetch(`${BASE}/_next/static/chunks/${c.replace(/\.js$/, `-z${key}.js`)}`);
-    if (r.ok) oldNames.push(c);
-  }
-}
+/* Every chunk written again, by its old name (Zones' debug info): none may be fetched under that name. */
+const renamedFrom = new Set(Object.keys((await (await fetch(`${BASE}/_next-zones/debug`)).json()).chunkUrls?.wide ?? {}).map((u) => u.split("/").pop()));
+const oldNames = [...new Set(chunks.filter((c) => renamedFrom.has(c)))];
 const wrong = {};
+if (!renamedFrom.size) wrong.chunkMap = "Zones' debug info lists no chunk of wide written again: the check does not test what it says";
 if (!installed.ok) wrong.install = installed.status;
 if (!rewritten.size) wrong.rewritten = "no chunk of the zone was written again: the check does not test what it says";
 if (soft !== "lazy card, context root") wrong.soft = soft;

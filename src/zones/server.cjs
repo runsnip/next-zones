@@ -135,6 +135,8 @@ function createServer(ctx, { assets, installer, bench, collector }) {
       heapSpacesMB: Object.fromEntries(require("node:v8").getHeapSpaceStatistics().map((s) => [s.space_name, +(s.space_used_size / 1048576).toFixed(1)])),
       runtimes: loaded.filter((f) => f.endsWith("[turbopack]_runtime.js")).map((f) => path.relative(process.cwd(), f)),
       serverChunksLoaded: loaded.filter((f) => f.includes(`${path.sep}chunks${path.sep}`)).length,
+      /* Each zone's chunks written again, old URL → new (zone-client.cjs). */
+      chunkUrls: Object.fromEntries([...ctx.zones.values()].map((z) => [z.name, z.chunkUrls ?? {}])),
       rssMB: +(process.memoryUsage().rss / 1048576).toFixed(1),
       heapUsedMB: +(process.memoryUsage().heapUsed / 1048576).toFixed(1),
       /* Where memory outside the JS heap goes (D14): V8's own (code, malloc, contexts) and Node's (buffers). */

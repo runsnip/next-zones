@@ -65,6 +65,13 @@ What changed in each version of `@runsnip/next-zones` on npm. The versions follo
   runtime never started, and its links navigated as plain links. A zone's page, which runs in the shell's document,
   gets the shell's registration (Zones as it reads the manifest, the link as it writes it). Prerendered pages had it
   already.
+- **Zones: a chunk two zones write again the same way loads once.** A chunk written again was named by the zone's
+  build (`…-z<build>.js`), so two zones sharing a chunk (a package both use) wrote the same bytes under two names, and
+  a document holding both loaded it twice (on the RunSnip replica: one shared chunk of Code's and Finder's,
+  byte-identical, under two names). It is now named by what its bytes are made of: its file as built, the new ids of
+  the modules it holds and requires, and the names of the chunks written again it names (hashed by strongly connected
+  component, since chunks may load each other). Same bytes, same name; and a zone's next version keeps a chunk's name
+  when it did not change.
 - **A build for Zones in a folder whose `node_modules` is linked from elsewhere**: the project root `zoneConfig` pins is
   found when the two share only the filesystem's root (a workspace in `/tmp`, its `node_modules` in `/home`). Before,
   the search for it never ended, and the build hung.

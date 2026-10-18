@@ -45,16 +45,11 @@ await browser.close();
 
 const RENAMED = /-z([0-9a-f]{8})\.js$/;
 const rewritten = new Set(chunks.filter((c) => RENAMED.test(c)));
-const keys = new Set([...rewritten].map((c) => RENAMED.exec(c)[1]));
-const oldNames = [];
-for (const c of new Set(chunks.filter((c) => !RENAMED.test(c)))) {
-  for (const key of keys) {
-    const r = await fetch(`${BASE}/_next/static/chunks/${c.replace(/\.js$/, `-z${key}.js`)}`);
-    if (r.ok) oldNames.push(c);
-  }
-}
-const workerRuntime = [...rewritten].filter((c) => c.startsWith("turbopack-"));
+/* Every chunk written again, by its old name (Zones' debug info): none may be fetched under that name. */
+const renamedFrom = new Set(Object.keys((await (await fetch(`${BASE}/_next-zones/debug`)).json()).chunkUrls?.wide ?? {}).map((u) => u.split("/").pop()));
+const oldNames = [...new Set(chunks.filter((c) => renamedFrom.has(c)))];
 const wrong = {};
+if (!renamedFrom.size) wrong.chunkMap = "Zones' debug info lists no chunk of wide written again: the check does not test what it says";
 if (!installed.ok) wrong.install = installed.status;
 if (!workerRuntime.length) wrong.workerRuntime = "no runtime chunk was written again: the check does not test what it says";
 if (soft !== "echo ping, react string") wrong.soft = soft;

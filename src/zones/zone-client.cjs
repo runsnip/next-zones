@@ -349,6 +349,54 @@ if (Object.keys(idMap).length) {
     }
   }
 }
+/*
+ * A chunk written again is named by what its bytes are made of, not by the zone: its file as built, the new ids of the
+ * modules it holds and requires, and the names of the chunks written again it names. Two zones that write one shared
+ * chunk again the same way (a package both use, no id of either remapped in it) then give it one name, and the browser
+ * loads it once; before, each zone's build key made a name of its own for the same bytes (two copies of one shared
+ * chunk in one document). A chunk's name depends on those it names, which may name it back (async loaders of each
+ * other): the chunks are hashed by strongly connected component, each component from its members' own parts and the
+ * names it reaches outside it. Same name, same bytes: whatever makes the bytes is in the name.
+ */
+if (Object.keys(chunkMap).length) {
+  const sha = (text) => crypto.createHash("sha256").update(text).digest("hex");
+  const remapped = (ids) => [...new Set(ids.map(String))].filter((id) => idMap[id] !== undefined).sort().map((id) => `${id}>${idMap[id]}`).join(",");
+  const nodes = new Map();
+  for (const c of chunks) {
+    const at = `static/chunks/${c.file}`;
+    if (!chunkMap[at]) continue;
+    const ids = c.groups.flatMap((g) => [...g.ids, ...requiredBy(g)]);
+    const names = new Set(c.groups.flatMap((g) => read(g).chunks.map((k) => k.path)));
+    nodes.set(at, { file: c.file, own: sha(`${sha(fs.readFileSync(path.join(dist, "static", "chunks", c.file)))}|${remapped(ids)}`), refs: [...names].filter((k) => chunkMap[k] && k !== at) });
+  }
+  for (const r of runtimes) {
+    const at = `static/chunks/${r.file}`;
+    if (!chunkMap[at]) continue;
+    nodes.set(at, { file: r.file, own: sha(`${sha(r.text)}|${remapped(r.refs.filter((ref) => ref.id).map((ref) => ref.id))}`), refs: [...new Set(r.refs.filter((ref) => ref.chunk && chunkMap[ref.chunk] && ref.chunk !== at).map((ref) => ref.chunk))] });
+  }
+  /* Tarjan's components, each found after every component it reaches: their names are known when it is hashed. */
+  const index = new Map(), low = new Map(), stack = [], onStack = new Set(), named = new Map();
+  let next = 0;
+  const visit = (at) => {
+    index.set(at, next); low.set(at, next); next++;
+    stack.push(at); onStack.add(at);
+    for (const to of nodes.get(at).refs) {
+      if (!nodes.has(to)) continue;
+      if (!index.has(to)) { visit(to); low.set(at, Math.min(low.get(at), low.get(to))); }
+      else if (onStack.has(to)) low.set(at, Math.min(low.get(at), index.get(to)));
+    }
+    if (low.get(at) !== index.get(at)) return;
+    const members = [];
+    for (let m; m !== at;) { m = stack.pop(); onStack.delete(m); members.push(m); }
+    const inside = new Set(members);
+    const outside = [...new Set(members.flatMap((m) => nodes.get(m).refs.filter((to) => !inside.has(to))))].map((to) => `${to}>${named.get(to)}`).sort();
+    const key = sha(JSON.stringify([members.map((m) => `${nodes.get(m).file}:${nodes.get(m).own}`).sort(), outside]));
+    for (const m of members) named.set(m, `static/chunks/${nodes.get(m).file.replace(/\.js$/, `-z${sha(`${key}:${nodes.get(m).file}`).slice(0, 8)}.js`)}`);
+  };
+  for (const at of nodes.keys()) if (!index.has(at)) visit(at);
+  for (const [at, name] of named) chunkMap[at] = name;
+}
+
 /* Each required id and chunk path rewritten where the parse found it: the original ids stay what the analysis below
    follows. */
 const remapSource = (g) => remapModule(g.source, read(g), idMap, chunkMap);
