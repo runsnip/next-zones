@@ -76,9 +76,10 @@ const SETUP = {
   cc: () => ({ NEXT_ZONES_SHELL: "fixtures-cc/shell", NEXT_ZONES_STORE: ".zones-store-cc", PORT: "3900" }),
 };
 /* Checks slower than 2 minutes: init installs a new workspace from the registry, then runs doctor and next dev
-   (2 min 46 s measured); release builds a shell and three zone images; single builds one app and three apps; rollout
+   (2 min 46 s measured); release builds a shell and three zone images; single builds one app and three apps;
+   zonesstandalone builds four apps (out of 2 × 120 s twice at load 50–80); rollout
    boots three Zones of its own and waits out nginx's fail_timeout. */
-const TIMEOUT = { composedpages: 300_000, singlepages: 600_000, singlepagesstandalone: 600_000, init: 360_000, release: 600_000, single: 600_000, ownhandler: 300_000, zonecsssingle: 300_000, zonecssexport: 300_000, zonecsszonesexport: 300_000, rollout: 600_000 };
+const TIMEOUT = { composedpages: 300_000, singlepages: 600_000, singlepagesstandalone: 600_000, init: 360_000, release: 600_000, single: 600_000, ownhandler: 300_000, zonecsssingle: 300_000, zonecssexport: 300_000, zonecsszonesexport: 300_000, zonesstandalone: 300_000, rollout: 600_000 };
 const EXPECTED = /may hold state|boom|broken on purpose|NoFallbackError|metadataBase|Running next\.config|Zones on :3900|next-zones: pruned|digest|^\s*at |^\s*[{}]|^\s*$/i;
 const chosen = process.argv.slice(2).length ? process.argv.slice(2) : CHECKS;
 /* The spike installs the package as a copy (install-links: Turbopack refuses a link out of its root), so the copy
