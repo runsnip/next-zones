@@ -8,11 +8,13 @@
  * and NEXT_ZONES_REGISTRY set to "off" turn a fix off, to measure what it fixes. NEXT_ZONES_UNSUPPORTED_NEXT=1 runs on a
  * Next not yet in next-contract.cjs SUPPORTED (the upgrade guard sets it). NEXT_ZONES_SOURCE is a folder of zone images
  * Zones pulls a version from (pull.mjs, endpoints.mjs, prune.mjs). NEXT_ZONES_PRUNE_KEEP turns pruning on.
+ * NEXT_ZONES_WARM sets the warm-up (off, on, or the paths to render).
  */
 const fs = require("node:fs");
 const path = require("node:path");
 const { createZones } = require("../../src/zones/index.cjs");
 const { fromDirectory } = require("../../src/sources.cjs");
+const { warmFromText } = require("../../src/zones/warm.cjs");
 
 const policyFile = path.join(__dirname, "zones.config.json");
 const zones = createZones({
@@ -21,6 +23,8 @@ const zones = createZones({
   cacheDir: path.resolve(__dirname, process.env.NEXT_ZONES_CACHE ?? ".zones-cache"),
   policy: fs.existsSync(policyFile) ? JSON.parse(fs.readFileSync(policyFile, "utf8")) : {},
   debug: true,
+  /* NEXT_ZONES_WARM: "off", "on" or the paths to render before listening (warm.cjs); on by default. */
+  ...(process.env.NEXT_ZONES_WARM ? { warm: warmFromText(process.env.NEXT_ZONES_WARM) } : {}),
   persist: process.env.NEXT_ZONES_PERSIST === "on",          // checks start from an empty Zones
   scopedLoaders: process.env.NEXT_ZONES_SCOPED_LOADERS !== "off",
   moduleRegistry: process.env.NEXT_ZONES_REGISTRY !== "off",

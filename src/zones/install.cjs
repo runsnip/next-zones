@@ -19,7 +19,7 @@ const metrics = require("../metrics.cjs");
 
 const now = () => performance.now();
 
-function createInstaller(ctx, { staging, activation, instrumentation, collector }) {
+function createInstaller(ctx, { staging, activation, instrumentation, collector, warm }) {
   /* One switch at a time: a plan is always prepared from the state its switch replaces (activate re-prepares a stale
      plan only once, which a concurrent switch could outrun). */
   let switchQueue = Promise.resolve();
@@ -57,6 +57,9 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
     t.read = now() - s0 - staged.timing.verify;
     await staging.analyseZoneClient(staged);
     await staging.seedCache(staged);
+    /* Its bundles loaded and its routes' manifests read before the switch (warm.cjs), off the one-at-a-time queue. */
+    const warmed = await warm.modules(staged);
+    t.warm = warmed.ms;
     t.stage = now() - s0;
     await exclusive(async () => {
       s0 = now();
@@ -85,6 +88,7 @@ function createInstaller(ctx, { staging, activation, instrumentation, collector 
     return {
       name, version: staged.version, state: stopped ? "stopped" : "serving", routes: staged.routes, ms: +(t.stage + t.activate).toFixed(3),
       blockedMs: +(loop.max / 1e6).toFixed(1), t, ...(staged.warnings?.length ? { warnings: staged.warnings } : {}),
+      ...(warmed.failed.length ? { warmFailed: warmed.failed } : {}),
     };
   }
 

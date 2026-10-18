@@ -30,6 +30,7 @@
  *   server.cjs           the HTTP layer
  *   endpoints.cjs        the URLs Zones serves of its own, only those the shell declares
  *   drain.cjs            stopping without failing a request, and the CLI's stop on a signal
+ *   warm.cjs             the warm-up: what a first request loads, loaded before Zones listens and before a switch
  *   bench.cjs            the activation benchmark (debug)
  * spikes/zones/RESULTS.md in the repository has the why of each, with the numbers.
  */
@@ -52,6 +53,7 @@ const { createCollector } = require("./collect.cjs");
 const { createReclaim } = require("./reclaim.cjs");
 const { createBench } = require("./bench.cjs");
 const { createServer } = require("./server.cjs");
+const { createWarm, warmOptions, warmFromText } = require("./warm.cjs");
 const { claimStore, releaseStore } = require("./prune.cjs");
 
 let created = false;
@@ -79,6 +81,9 @@ process.once("exit", () => { if (claimed) releaseStore(claimed); });
  * @param {string} [options.adminToken] required by the admin endpoints (install, policy) unless the request is local
  * @param {boolean} [options.strictModules] refuse a zone whose client modules differ from the shell's copies of them and may
  *                                       hold state (two copies of a context); by default, the install reports them in warnings
+ * @param {boolean|object} [options.warm] default true: before Zones listens, every installed build's bundles loaded and
+ *                                       each mount rendered once in-process; a zone version's bundles before its switch.
+ *                                       { routes: ["/", "/blog"] | "mounts" | false, timeoutMs: 10000 }; false: none (warm.cjs)
  * @param {boolean} [options.debug]     enables <base>/debug and <base>/bench (with endpoints declared)
  * @param {boolean} [options.scopedLoaders]  default true (turned off only to measure what it fixes)
  * @param {boolean} [options.moduleRegistry] default true (idem)
@@ -87,6 +92,7 @@ process.once("exit", () => { if (claimed) releaseStore(claimed); });
 function createZones(options = {}) {
   if (created) throw new Error("next-zones: one Zones per process (it hooks Node's module loader and Next's internals)");
   if (!options.shell) throw new Error("next-zones: createZones({ shell }) is required");
+  warmOptions(options.warm);                       // a wrong warm option refuses before anything is hooked
   created = true;
   /* Zones serves production builds, as `next start` does, which sets NODE_ENV to "production" when it is unset before
      anything loads: packages read it once, as they load (react picks its development or production build by it), and a
@@ -114,17 +120,27 @@ function createZones(options = {}) {
   const activation = createActivation(ctx, { rules });
   ctx.reclaim = createReclaim(ctx);
   const collector = createCollector(ctx);
-  const installer = createInstaller(ctx, { staging, activation, instrumentation, collector });
+  let server = null;
+  const warm = createWarm(ctx, { render: (req, res) => server.warmRequest(req, res) });
+  const installer = createInstaller(ctx, { staging, activation, instrumentation, collector, warm });
   const bench = createBench(ctx, { staging, activation });
-  const server = createServer(ctx, { assets, installer, bench, collector });
+  server = createServer(ctx, { assets, installer, bench, collector, warm });
+  /* The boot: the shell's Next prepared, the pinned and saved versions installed (each warmed before its switch), then
+     the shell's bundles and the routes warmed. Zones listens only after it: /health never answers before. */
+  async function boot(port, hostname) {
+    claimStore(ctx.store);
+    await server.prepare(port, hostname);
+    await installer.restore();
+    await warm.modules();
+    await warm.renders();
+    warm.booted();
+  }
   let httpServer = null;
 
   const zones = {
-    /** Prepares the shell, installs the pinned and saved versions, and starts serving; resolves once listening. */
+    /** Prepares the shell, installs the pinned and saved versions, warms up, and starts serving; resolves once listening. */
     async listen(port = 3000, hostname = "0.0.0.0") {
-      claimStore(ctx.store);
-      await server.prepare(port, hostname);
-      await installer.restore();
+      await boot(port, hostname);
       /* Draining: every response closes its connection, so a proxy holds no kept-alive one to a process leaving. */
       httpServer = http.createServer(closing(ctx, (req, res) => server.handleRequest(req, res).catch((error) => {
         console.error(error);
@@ -133,8 +149,8 @@ function createZones(options = {}) {
       await new Promise((resolve) => httpServer.listen(port, hostname, resolve));
       return httpServer;
     },
-    /** Prepares the shell without listening, to mount handleRequest in a server of your own. */
-    prepare: async (port = 3000, hostname = "0.0.0.0") => { claimStore(ctx.store); await server.prepare(port, hostname); await installer.restore(); },
+    /** Prepares the shell and warms it up without listening, to mount handleRequest in a server of your own. */
+    prepare: (port = 3000, hostname = "0.0.0.0") => boot(port, hostname),
     /** The request handler (after listen() or prepare()). */
     handleRequest: server.handleRequest,
     /** Installs (or swaps to, or rolls back to) a zone image, pulled from the sources first when the store lacks it. */
@@ -145,6 +161,8 @@ function createZones(options = {}) {
     prune: (options) => installer.prune(options),
     /** Collects old versions, keeping the active one and `keep` before it per zone. */
     collect: (options) => collector.collect(options),
+    /** What the boot's warm-up did: { ms, modules, failed, routes }, or null with warm: false. */
+    warmed: warm.report,
     /** What boot installed: zone → { version, ok, error? }. */
     boot: installer.boot,
     /** Every zone and its state: serving, stopped, failed (at boot) or available (images in the store only). */
@@ -168,4 +186,4 @@ function createZones(options = {}) {
   return zones;
 }
 
-module.exports = { createZones };
+module.exports = { createZones, warmFromText };

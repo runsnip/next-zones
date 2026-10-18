@@ -7,6 +7,7 @@ Tools for developing next-zones itself. The CLI for users is in `src/` (`next-zo
 | `build-zone.mjs <zones dir> <zone> <version> [--store <dir>]` | Builds one version of a zone into a zone store: the build, plus `zone.json` (name, version, mount, aliases). It builds the zone where it is |
 | `bench/activation.mjs [--url URL] [--runs N] [--pad N] [--dynamic N] [--lru N]` | Activation benchmark on a running Zones service: `prepare` and the switch, phase by phase, at a given app size |
 | `bench/latency.mjs [--url URL] [--paths a,b] [--n N] [--warmup N]` | Request latency through a running Zones service, p50 / p95 / p99 |
+| `bench/warm.mjs [--warm false\|true\|<json>] [--pins z=v,…] [--paths a,b] [--install z=v]` | A fresh Zones on the spike's shell: its time to listening and its warm-up, the first and second request to each path, and a live install's switch, warm-up and first requests |
 
 ## How benchmarks are run and reported
 

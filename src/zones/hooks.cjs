@@ -104,9 +104,10 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
         }
         if (typeof args?.manifest === "string" && args.manifest.startsWith("server/app/")) {
           const build = renderBuild.getStore();
-          /* `build` is one of the two names stage.cjs gives a build's folder (as given, and its real path). */
+          /* `build` is one of the two names stage.cjs gives a build's folder (as given, and its real path); a build
+             warmed before its switch (warm.cjs) is not recorded yet. */
           const real = (dir) => { try { return fs.realpathSync(dir) + path.sep; } catch { return null; } };
-          const staged = build ? [...(ctx.staged?.values() ?? [])].find((z) => build === path.resolve(z.dist) + path.sep || build === real(z.dist)) : null;
+          const staged = build ? [...(ctx.staged?.values() ?? []), ...(ctx.warming ?? [])].find((z) => build === path.resolve(z.dist) + path.sep || build === real(z.dist)) : null;
           for (const z of staged ? [staged] : ctx.zones.values()) {
             for (const page of z.notFound === "/_not-found/page" ? [...Object.keys(z.appPaths), z.notFound] : Object.keys(z.appPaths)) {
               if (!args.manifest.startsWith(`server/app${page}`)) continue;

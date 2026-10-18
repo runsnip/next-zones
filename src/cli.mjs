@@ -13,7 +13,7 @@
  *                                                   runs what build made: Zones with the shell and the pinned images, or
  *                                                   (mode "single") next start of the one app
  *   serve --shell <dir> [--store <dir>] [--cache <dir>] [--pins zones.json] [--source <url template | dir>]…
- *         [--keep 2] [--no-prune] [--min-free <MB>] [--port 3000] [--host 0.0.0.0]
+ *         [--keep 2] [--no-prune] [--min-free <MB>] [--warm on|off|<paths>] [--port 3000] [--host 0.0.0.0]
  *                                                   runs Zones: the shell, with zones installed from the store
  *   pack <zone image dir> [--out <file.tgz|file.zip>] packs a zone image (<store>/<zone>/<version>) into one .tgz or .zip
  *   pull <zone> <version> --store <dir> --source <url template | dir>… [--min-free <MB>]
@@ -229,12 +229,17 @@ async function serve() {
   /* Sources: where zone images are pulled from (an http(s) template with {zone} and {version}, or a folder). Without
      them Zones installs what is in its store only. */
   const noPrune = takeSwitch("no-prune"), keep = flag("keep"), minFree = flag("min-free");
+  /* The warm-up before listening (zones/warm.cjs): --warm, else NEXT_ZONES_WARM, else zones.config.json's "warm", else
+     on. "off", "on", or the paths to render ("/,/blog"). */
+  const { warmFromText } = createRequire(import.meta.url)("./zones/warm.cjs");
+  const warm = warmFromText(flag("warm", process.env.NEXT_ZONES_WARM)) ?? policy?.warm;
   const options = {
     shell, store: flag("store", process.env.NEXT_ZONES_STORE), cacheDir: flag("cache"), adminToken: process.env.NEXT_ZONES_ADMIN_TOKEN, pins, pinsAt,
     ...(policy ? { policy } : {}),
     sources: takeSources(),
     prune: noPrune ? false : { keep: keep === undefined ? 2 : wholeNumber(keep, "--keep") },
     ...(minFree !== undefined ? { minFree: wholeNumber(minFree, "--min-free") * 1048576 } : {}),
+    ...(warm !== undefined ? { warm } : {}),
   };
   const port = Number(flag("port", process.env.PORT ?? 3000)), host = flag("host", "0.0.0.0");
   /* SIGTERM (a supervisor stopping it: `docker stop`, a rolling deploy) or SIGINT drains: no new connection, the
@@ -258,6 +263,13 @@ async function serve() {
   stop.listening();
   console.log(`next-zones: Zones on http://${host}:${port}, shell ${path.resolve(shell)}`);
   for (const [zone, z] of Object.entries(server.zones())) console.log(`  ${zone} ${z.version ?? z.versions?.join(", ")} ${z.state}`);
+  const w = server.warmed();
+  if (w) {
+    const bad = w.routes.filter((r) => r.error || r.status >= 400);
+    console.log(`  warm-up ${w.ms} ms: ${w.modules} bundles, ${w.routes.length - bad.length} of ${w.routes.length} renders${w.failed.length ? `, ${w.failed.length} bundles not loaded` : ""}`);
+    for (const f of w.failed) console.log(`  ✗ ${f.zone ?? "shell"} ${f.page}: ${f.error}`);
+    for (const r of bad) console.log(`  ✗ ${r.path}${r.rsc ? " (RSC)" : ""}: ${r.error ?? r.status}`);
+  }
 }
 
 async function pack() {

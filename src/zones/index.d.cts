@@ -33,6 +33,13 @@ declare namespace nextZonesZones {
     /** Refuse a zone whose client modules differ from the shell's copies of them and may hold state (two copies of a
         context); by default the install reports them in `warnings`. */
     strictModules?: boolean;
+    /**
+     * The warm-up, before Zones listens (default true): every installed build's page and route bundles loaded with
+     * their manifests, the shell's middleware, and `routes` rendered once in-process, as a document and as an RSC
+     * request ("mounts", the default: each zone's mount and the shell's "/"; false: none). A zone version installed
+     * later has its bundles loaded before its switch. false: no warm-up.
+     */
+    warm?: boolean | { routes?: string[] | "mounts" | false; timeoutMs?: number };
     /** Enables <base>/debug and <base>/bench (with endpoints declared). */
     debug?: boolean;
     scopedLoaders?: boolean;
@@ -76,7 +83,18 @@ declare namespace nextZonesZones {
     routes: string[];
     ms: number;
     blockedMs: number;
+    /** The phases, in ms; `warm` is the version's bundles loaded before its switch. */
     t: Record<string, number>;
+    /** Bundles the warm-up could not load (they load, or fail, at their first request as before). */
+    warmFailed?: { zone?: string; page: string; error: string }[];
+  }
+  interface WarmReport {
+    /** The boot's warm-up, zones' installs at boot included. */
+    ms: number;
+    /** Bundles loaded. */
+    modules: number;
+    failed: { zone?: string; page: string; error: string }[];
+    routes: { path: string; rsc: boolean; status: number; ms: number; error?: string }[];
   }
   interface PruneResult {
     /** "zone@version" removed from the store. */
@@ -97,6 +115,8 @@ declare namespace nextZonesZones {
     prune(options?: { keep?: number; dryRun?: boolean }): Promise<PruneResult>;
     collect(options?: { keep?: number }): Promise<{ removed: string[]; pinned: string[]; kept: string[] }>;
     boot(): Record<string, { version: string; ok: boolean; error?: string }>;
+    /** What the boot's warm-up did; null with warm: false. */
+    warmed(): WarmReport | null;
     /** Every zone and its state. */
     zones(): Record<string, ZoneState>;
     /** Stops a zone: its URLs answer 404, marked x-next-zones-state: stopped and x-next-zones-zone; it stays installed. */
@@ -125,9 +145,13 @@ declare namespace nextZonesZones {
 /** Zones: one per process, created before anything else requires Next. */
 declare function createZones(options: nextZonesZones.ZonesOptions): nextZonesZones.Zones;
 
-export { createZones };
+/** --warm and NEXT_ZONES_WARM as an option: "off", "on", "mounts", or comma-separated paths; undefined when empty. */
+declare function warmFromText(text: string | undefined): nextZonesZones.ZonesOptions["warm"] | undefined;
+
+export { createZones, warmFromText };
 export type ZonesOptions = nextZonesZones.ZonesOptions;
 export type Zones = nextZonesZones.Zones;
 export type PruneResult = nextZonesZones.PruneResult;
 export type ZoneState = nextZonesZones.ZoneState;
 export type StopResult = nextZonesZones.StopResult;
+export type WarmReport = nextZonesZones.WarmReport;

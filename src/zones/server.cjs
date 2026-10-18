@@ -101,7 +101,7 @@ function stoppedLookup(stopped, getPathMatch, revision = () => 0) {
 /* What Zones tells of a request: set by Zones alone, never taken from the client. */
 const STATE_HEADER = "x-next-zones-state", ZONE_HEADER = "x-next-zones-zone";
 
-function createServer(ctx, { assets, installer, bench, collector }) {
+function createServer(ctx, { assets, installer, bench, collector, warm }) {
   const next = ctx.requireNext("next");
   const { getPathMatch } = ctx.requireNext("next/dist/shared/lib/router/utils/path-match");
   let app = null, handle = null;
@@ -127,6 +127,9 @@ function createServer(ctx, { assets, installer, bench, collector }) {
     const loaded = Object.keys(require.cache);
     return {
       sharedServerEvals: globalThis.__sharedServerEvals ?? 0,
+      /* The boot's warm-up, and which page bundles are loaded now (warm.cjs). */
+      warm: warm?.report() ?? null,
+      bundles: warm?.loaded() ?? null,
       reclaimed: ctx.reclaimed,
       /* Next's LRUs as Zones keeps them (kept-lru.cjs): entries, and the generations they remember (D3). */
       lrus: [...ctx.lrus].map((l) => ({ entries: l.size, born: l.born?.size ?? 0, totalSize: l.currentSize ?? null, maxSize: l.maxSize })),
@@ -163,6 +166,10 @@ function createServer(ctx, { assets, installer, bench, collector }) {
     const url = new URL(req.url, "http://x");
     ctx.metrics?.track(req, res, url.pathname);
     if (await endpoints.handle(req, res, url)) return;
+    return route(req, res, url);
+  }
+  /* A request past Zones' own URLs: a stopped zone's, a zone's file, or Next's. The warm-up's renders start here. */
+  async function route(req, res, url) {
     delete req.headers[STATE_HEADER];
     delete req.headers[ZONE_HEADER];
     /* A stopped zone: the shell's not-found, with a 404 (an RSC request gets the payload, so a soft navigation shows
@@ -251,7 +258,10 @@ function createServer(ctx, { assets, installer, bench, collector }) {
     }
   }
 
-  return { handleRequest, prepare, close: () => app?.close?.() };
+  /** Renders a request in-process for the warm-up (warm.cjs): routed as any request, but not counted or tracked. */
+  const warmRequest = (req, res) => (ctx.requestScope ?? ((fn) => fn()))(() => route(req, res, new URL(req.url, "http://x")));
+
+  return { handleRequest, prepare, warmRequest, close: () => app?.close?.() };
 }
 
 module.exports = { createServer, stoppedLookup };

@@ -7,6 +7,17 @@ What changed in each version of `@runsnip/next-zones` on npm. The versions follo
 
 ### Added
 
+- **Zones: a warm-up before it listens.** `next-zones serve` and `start`, and `createZones().listen()` and
+  `prepare()`, load every installed build's page and route bundles (their server chunks, each route's manifests, the
+  client reference manifest evaluated; the shell's node middleware), then render each zone's mount and the shell's
+  `/` once in-process, as a document and as an RSC request, with Next's request mocks: no socket. Only then does Zones
+  listen, so `<base>/health` never answers a cold process, and a proxy that sends requests to a new process as soon
+  as it listens finds its routes loaded. A live install loads the new version's bundles before its switch, outside
+  the queue of switches; the switch is unchanged. `createZones({ warm })`: `true` (the default), `false`, or
+  `{ routes: [paths] | "mounts" | false, timeoutMs }`; `--warm off|on|<paths>`, `NEXT_ZONES_WARM`, or `"warm"` in
+  `zones.config.json`. `zones.warmed()` and `<base>/debug` tell what it did; an install's result has `t.warm`. Measured
+  on the spike's five zones: 14 first requests 1,819 → 206 ms, for a warm-up of 378 ms; a live install's first
+  requests 96 and 118 → 14 and 10 ms, for 83 ms before its switch. See [warm-up](docs/zones.md#warm-up).
 - **Zones: a stop drains.** `next-zones serve` and `start` drain on `SIGTERM` or `SIGINT` (`docker stop`, a rolling
   deploy): `<base>/health` answers `503` and the open tabs' event streams end with `retry: 1000`, so they reconnect
   through the proxy to a Zones that stays; it stops listening, answers the requests in flight, with `Connection:

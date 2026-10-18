@@ -1226,3 +1226,32 @@ plain HTTP server; each new assertion fails on the previous drain.
 **What is left:** a loop busy for the whole 5 s still leaves the window of its last turn: the kernel completes a
 connection's handshake before the process accepts it, and Node gives no way to accept what is queued and close in one
 step.
+
+## A warm-up before listening (rolling deploys)
+
+**Why.** A proxy that re-resolves its upstream sends requests to a new Zones as soon as it listens; the first request
+to each route paid for loading it (server chunks read and compiled, manifests read, components evaluated, React's
+renderers run once): 60 to 790 ms each on the spike, seconds on a busy host, and those slow answers fed timeouts and
+"no live upstreams" during deploys.
+
+**What.** `zones/warm.cjs`: before `listen()`, each installed build's page and route bundles are required, with fetch
+patched and each route's manifests loaded through its route module in its own build; the shell's node middleware;
+then each mount rendered in-process as a document and as an RSC request (`_rsc=`, or Next redirects it), with Next's
+request mocks and an unconnected socket (the mock's own throws on any property but two, which `proxy.ts` reads). A
+live install requires the new version's bundles after staging, before its switch, with the build looked up among the
+builds being warmed (hooks.cjs), since it is recorded only after its switch. Components are not evaluated outside a
+render: Turbopack keeps a module factory's error.
+
+**Measured once** (`tools/bench/warm.mjs`, Node 24.16, Next 16.3.8, Apple M1, load average 18–19, five zones pinned,
+14 routes requested once in sequence, then again; ms): `warm: false` first 1,819 / second 293; `warm: true` warm-up
+378 (54 bundles, 12 renders), first 206 / second 74. Bundles only (`routes: false`, an exploratory run at load 20):
+warm-up 1,198, first 1,799 / second 282, 6.4× against 6.2× with none: at boot, the bundles alone left most of the
+first-request cost, which is the first render's; one run each, so not a measure of how much. A live install of blog 2: warm 83 ms, switch
+22 µs, event loop held at most 22 ms, first `/blog` and `/blog/42` 14 and 10 ms (96 and 118 without). The time to
+listening moved between 2.7 and 19.8 s across the runs with the machine's load, more than the warm-up costs: the
+warm-up is timed in the process, and each run's first requests are compared with its second ones.
+
+**What is left:** routes other than the mounts keep their components' cost unless listed (`/about` 33 ms, `/blog/42`
+32 ms first, against 6 and 7); a new version's routes are not rendered before its switch (it serves nothing before);
+`mode: "single"` runs Next's own server, which preloads its bundles after listening.
+

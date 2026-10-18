@@ -233,7 +233,8 @@ async function traceZonesRuntime({ shellDir, root }) {
 const ZONES_ENTRY = `/* Written by next-zones build: Zones for this standalone folder, as server.js is Next's. Environment: PORT,
    HOSTNAME, NEXT_ZONES_STORE (default ./.zones-store), NEXT_ZONES_CACHE, NEXT_ZONES_ADMIN_TOKEN, NEXT_ZONES_SOURCES (a
    comma-separated list of folders or http(s) templates with {zone} and {version}), NEXT_ZONES_CONNECTOR with
-   NEXT_ZONES_CONNECTOR_OWNER and NEXT_ZONES_CONNECTOR_TOKEN (service-connector as one more source). */
+   NEXT_ZONES_CONNECTOR_OWNER and NEXT_ZONES_CONNECTOR_TOKEN (service-connector as one more source), NEXT_ZONES_WARM
+   ("off", "on", or the paths to render before listening; else zones.config.json's "warm"). */
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -250,6 +251,8 @@ if (process.env.NEXT_ZONES_CONNECTOR) {
   sources.push(fromConnector({ origin: process.env.NEXT_ZONES_CONNECTOR, owner: process.env.NEXT_ZONES_CONNECTOR_OWNER, token: process.env.NEXT_ZONES_CONNECTOR_TOKEN }));
 }
 const pinsFile = path.join(__dirname, "zones.json"), policyFile = path.join(__dirname, "zones.config.json");
+const policy = fs.existsSync(policyFile) ? JSON.parse(fs.readFileSync(policyFile, "utf8")) : null;
+const warm = require("@runsnip/next-zones/zones").warmFromText(process.env.NEXT_ZONES_WARM) ?? policy?.warm;
 const zones = createZones({
   shell: __dirname,
   store: process.env.NEXT_ZONES_STORE ?? path.join(__dirname, ".zones-store"),
@@ -257,7 +260,8 @@ const zones = createZones({
   adminToken: process.env.NEXT_ZONES_ADMIN_TOKEN,
   pins: fs.existsSync(pinsFile) ? JSON.parse(fs.readFileSync(pinsFile, "utf8")).zones ?? {} : {},
   pinsAt: fs.existsSync(pinsFile) ? fs.statSync(pinsFile).mtimeMs : 0,
-  ...(fs.existsSync(policyFile) ? { policy: JSON.parse(fs.readFileSync(policyFile, "utf8")) } : {}),
+  ...(policy ? { policy } : {}),
+  ...(warm !== undefined ? { warm } : {}),
   sources,
 });
 const port = parseInt(process.env.PORT, 10) || 3000, hostname = process.env.HOSTNAME || "0.0.0.0";

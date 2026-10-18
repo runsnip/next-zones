@@ -143,8 +143,10 @@ A request that is not an admin's gets 401 `{ error }`, and nothing changes. A to
 
 1. **Stage.** Zones reads the zone build: its routes, server actions and prerendered pages. Then it checks the
    rules: the mount, the aliases, no zone-level `proxy.ts`, the same Next version.
-2. **Prepare.** Everything that grows with the size of the app is computed **before** the switch.
-3. **Switch.** One synchronous step, so no request ever sees half an install. It takes about **3 µs** (median, an app
+2. **Warm.** The version's page and route bundles are loaded, with each route's manifests, as its first requests
+   would load them ([warm-up](#warm-up)): outside the queue of switches, so it delays no other install.
+3. **Prepare.** Everything that grows with the size of the app is computed **before** the switch.
+4. **Switch.** One synchronous step, so no request ever sees half an install. It takes about **3 µs** (median, an app
    of 248 routes, 75 of them dynamic, and a zone of 29 routes).
 
 The heavy work of a first install (seeding the zone's cache, analysing its chunks) runs in worker threads, so the
@@ -257,6 +259,60 @@ first character. Matching every alias's pattern instead, the first version, cost
 2.7 µs with ten. What remains is a map lookup per character of the first segment and the alias patterns of a segment
 that does match.
 
+## Warm-up
+
+A process that has just started pays, on the first request to each route, for loading that route: its server
+chunks read and compiled, its manifests read, its components evaluated, React's renderers run for the first time.
+Behind a proxy that sends requests to a new process as soon as it listens, those first answers come slow, at the
+moment a deploy can least afford them. So Zones warms up **before it listens**:
+
+1. Each zone pinned or saved is installed, and each version's page and route bundles are loaded before its switch.
+2. The shell's bundles are loaded, and its node middleware (`proxy.ts`).
+3. Routes are rendered once in-process, each as a document and as an RSC request (a soft navigation's), through
+   Zones' routing as a request goes, with Next's request mocks: no socket is opened. By default, each zone's mount
+   and the shell's `/`.
+
+Zones does not listen until this is done, so `<base>/health` has nothing to answer before it: a supervisor or a
+proxy sees a refused connection, then a warm process. A route that fails or runs out of time is reported, never
+fatal: its first request loads it, or fails, as before. A page's components are not evaluated outside a render:
+Turbopack keeps a module factory's error, so one evaluated outside its render's context and failing there would
+fail every render after. Rendering a route evaluates them in their render.
+
+A live install warms the new version's bundles before its switch; the switch itself is unchanged. Routes are not
+rendered then: the version serves nothing before its switch, and its first render after it is the one left.
+
+```js
+createZones({ shell, warm: true });                                     // the default
+createZones({ shell, warm: { routes: ["/", "/blog", "/blog/latest"], timeoutMs: 10_000 } });
+createZones({ shell, warm: { routes: false } });                        // bundles only
+createZones({ shell, warm: false });                                    // none
+```
+
+A workspace built with `mode: "single"` runs Next's own server (`next start`, or the standalone `server.js`), which
+next-zones does not change: Next loads every bundle as it starts (`experimental.preloadEntriesOnStart`, on by
+default), but after it listens, and renders nothing.
+
+`next-zones serve` and `start` take `--warm off|on|<paths>` (`/,/blog`), else `NEXT_ZONES_WARM`, else the
+`"warm"` field of `zones.config.json` (the same values as the option); a standalone folder's `zones.js` reads the
+last two. It prints what it did once listening. `zones.warmed()` (and `warm` in `<base>/debug`) tells it: the time,
+the bundles loaded, those that failed, and each route rendered with its status and time.
+
+Measured once (`tools/bench/warm.mjs`, Node 24.16, Next 16.3.8, Apple M1 at load average about 18; the spike's
+shell with blog, docs, shop, wide and wiki pinned; 14 routes requested once each in sequence after listening, then
+a second time; ms):
+
+| | warm-up before listening | first requests, all 14 | second requests | first / second |
+|---|---|---|---|---|
+| `warm: false` | — | 1,819 | 293 | 6.2× |
+| `warm: true` | 378 (54 bundles, 12 renders) | 206 | 74 | 2.8× |
+
+The mounts' first requests fell to a few ms (`/blog` 143 → 4, `/docs` 200 → 4, `/wide` 107 → 4); routes not
+rendered keep what their components cost (`/about` 198 → 33, `/blog/42` 278 → 32): list them in `routes` to warm
+them. A live install of blog 2 warmed it in 83 ms before its switch (22 µs); its first requests then took 14 and
+10 ms, against 96 and 118 without. The machine was shared and its load moved: boot times between the runs varied
+more than the warm-up costs (2.7 to 19.8 s to listening), so the warm-up is timed inside the process, and the first
+requests are compared with the second ones of the same run.
+
 ## Rolling deploys
 
 A live install changes a zone inside one process. A deploy of a new image replaces the process, and two things make
@@ -281,6 +337,8 @@ that invisible to users: a proxy in front of more than one Zones for the time of
   (`NEXT_ZONES_DRAIN_LINGER_MS`) keeps the process refusing connections that long after the drain, so a proxy that
   marks a server down on a refusal has stopped using it before it goes. nginx: `max_fails=1 fail_timeout=10s`
   (longer than nginx takes to drop the address), `--drain-linger 2000`, `proxy_connect_timeout 1s`.
+- **It listens warm.** A new Zones refuses connections until its [warm-up](#warm-up) is done, so the first requests
+  a proxy sends it find their routes loaded.
 - **Marking has a cost: wait it out.** A Zones refuses connections until it listens, so the proxy marks a booting one
   down too, and it stays down for `fail_timeout` after. Stop the other one only once that has passed (healthy, then
   `fail_timeout` + 1 s), or the proxy has no live server. nginx then sends a server it marked down one request, and
