@@ -184,13 +184,16 @@ const zoneIds = identities(chunks.flatMap((c) => c.groups));
 /* 0. Aliases. Turbopack's ids are a hash of the module's path cut to as many digits as the build needs to keep them
    apart, so one module has a longer id in a build with more modules: 912598 in a zone of 3,000 modules, 12598 in a
    shell of 400 (the shorter is the longer's last digits). Such a module is one the browser may hold, under another id:
-   the same identity with the same last digits. The zone uses the id the browser may hold, so the module is shared.
-   Against every id the browser may hold — the shell's and those of the zones installed before — not the shell's alone:
-   a large zone installed first (Admin, with the office packages) holds them under its own wider ids, and a zone
-   installed after it with the same packages (Docx, PDF) was otherwise taken for a build from another project root. */
+   the same identity with the same last digits. The zone uses the shell's id, so the module is shared.
+   Aliased to the shell's ids only: an alias rewrites the zone's chunk, and a chunk two zones share (the same file in
+   both builds, one URL) would be written twice under two names and loaded twice on a soft navigation (measured:
+   code and finder, 2026-10-18). A module an earlier zone holds under a wider id (Admin first, with the office
+   packages; Docx and PDF after it) is not rewritten, but it is the same module: `sameModule` counts it as such for
+   the project-root check below, which otherwise refused Docx and PDF. */
 const idsOf = new Map();                                       // identity → the ids the browser may hold it under
 for (const [id, hs] of known) for (const h of hs) (idsOf.get(h) ?? idsOf.set(h, []).get(h)).push(id);
-const aliases = new Map();                                     // zone id → the id the browser holds the same module by
+const aliases = new Map();                                     // zone id → the shell's id for the same module
+const sameModule = new Set();                                  // zone ids held under a same-tail id, the shell's or not
 {
   const shellIds = new Set(chunksOf(shellDist).flatMap((f) => chunkGroups(path.join(shellDist, "static", "chunks", f)).flatMap((g) => g.ids.map(String))));
   /* One id is the other's last digits: the longer cut to some width at least the shorter's length is the shorter (an
@@ -204,7 +207,9 @@ const aliases = new Map();                                     // zone id → th
   for (const [id, h] of zoneIds) {
     if (!/^\d+$/.test(id) || known.get(id)?.has(h)) continue;
     const candidates = (idsOf.get(h) ?? []).filter((other) => other !== id && /^\d+$/.test(other) && sameTail(id, other) && !(groupOf.has(other) && zoneIds.get(other) !== h));
-    const match = candidates.find((other) => shellIds.has(other)) ?? candidates[0];
+    if (!candidates.length) continue;
+    sameModule.add(id);
+    const match = candidates.find((other) => shellIds.has(other));
     if (match) aliases.set(id, match);
   }
 }
@@ -220,7 +225,7 @@ const shared = { sameCode: 0, sameId: 0, differ: [] };
   for (const [id, h] of zoneIds) {
     if (!idsOf.has(h)) continue;
     shared.sameCode++;
-    if (known.get(id)?.has(h) || aliases.has(id)) shared.sameId++;
+    if (known.get(id)?.has(h) || sameModule.has(id)) shared.sameId++;
     else if (shared.differ.length < 5) {
       const code = (groupOf.get(id)?.source ?? "").replace(/\s+/g, " ").slice(0, 120);
       shared.differ.push({ id, knownAs: idsOf.get(h).slice(0, 3), code });

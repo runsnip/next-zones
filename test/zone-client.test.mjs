@@ -78,7 +78,7 @@ test("modules the shell has under other ids are counted and a sample of them nam
   }
 });
 
-test("a module an earlier zone holds under a wider id is the same module (Admin then Docx): aliased, not another root", { skip }, async () => {
+test("a module an earlier zone holds under a wider id is the same module (Admin then Docx): not another root, and not rewritten", { skip }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nz-earlier-"));
   fs.symlinkSync(SPIKE_MODULES, path.join(root, "node_modules"));
   try {
@@ -92,8 +92,11 @@ test("a module an earlier zone holds under a wider id is the same module (Admin 
     /* A smaller zone after it, with the same package: five-digit ids, the wider ones' last digits. */
     const small = build(root, "small", { "page.js": PUSH(`91096,(e)=>{e.v("pdf-lexer")},92719,(e)=>{e.v("numfmt")},55555,(e)=>{e.v(5)}`) }, ["static/chunks/page.js"]);
     const second = await analyse({ dist: small, shellDist, known, outDir: path.join(root, "out-small"), buildKey: "fedcba9876543210", urlPrefix: "/_next/" });
-    assert.equal(second.idMap["91096"], 691096);
-    assert.equal(second.idMap["92719"], 992719);
+    /* Counted as the same modules (no refusal), but the zone's chunk keeps its ids: a chunk two zones share stays one
+       file under one name, loaded once. */
+    assert.equal(second.idMap["91096"], undefined);
+    assert.equal(second.idMap["92719"], undefined);
+    assert.deepEqual(second.chunkMap, {});
     assert.deepEqual({ sameCode: second.shared.sameCode, sameId: second.shared.sameId, differ: second.shared.differ }, { sameCode: 2, sameId: 2, differ: [] });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

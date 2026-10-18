@@ -187,7 +187,7 @@ function createStaging(ctx) {
     ? `. Under another id, for example: ${sample.map((m) => `${m.id} (known as ${m.knownAs.join(", ")}): ${JSON.stringify(m.code)}`).join("; ")}`
     : "");
 
-  const ANALYSIS = "m17";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
+  const ANALYSIS = "m18";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
   async function analyseZoneClient(staged) {
     /* A zone without App Router pages has no client code that runs in the shell's document: its Pages Router pages
        load in documents of their own, with the zone's own runtime and chunks, as built. */
