@@ -206,13 +206,21 @@ const aliases = new Map();                                     // zone id → th
 /* The modules the zone has that the browser may hold (the same identity), and how many of them it has under the same
    id (or an alias). Builds made from different project roots name every module differently, so they share none:
    stage.cjs refuses such a zone rather than run it with two copies of everything the shell has. */
-const shared = { sameCode: 0, sameId: 0 };
+/* With a sample of the ones under another id (the zone's id, the ids the browser knows the same module by, the start of
+   its code), so a refusal says what differs: a package installed twice at two versions, say, sits at two paths, and an
+   identical module of it has two ids. */
+const shared = { sameCode: 0, sameId: 0, differ: [] };
 {
-  const knownHashes = new Set([...known.values()].flatMap((hs) => [...hs]));
+  const idsOf = new Map();                                     // identity → the ids the browser may hold it under
+  for (const [id, hs] of known) for (const h of hs) (idsOf.get(h) ?? idsOf.set(h, []).get(h)).push(id);
   for (const [id, h] of zoneIds) {
-    if (!knownHashes.has(h)) continue;
+    if (!idsOf.has(h)) continue;
     shared.sameCode++;
     if (known.get(id)?.has(h) || aliases.has(id)) shared.sameId++;
+    else if (shared.differ.length < 5) {
+      const code = (groupOf.get(id)?.source ?? "").replace(/\s+/g, " ").slice(0, 120);
+      shared.differ.push({ id, knownAs: idsOf.get(h).slice(0, 3), code });
+    }
   }
 }
 

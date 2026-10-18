@@ -60,3 +60,20 @@ test("a worker's runtime chunk is written again with its chunks' new names, and 
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("modules the shell has under other ids are counted and a sample of them named (an installed-twice package)", { skip }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nz-differ-"));
+  fs.symlinkSync(SPIKE_MODULES, path.join(root, "node_modules"));
+  try {
+    /* The same module code at two paths (one package at two versions, an unchanged file of it): two ids. */
+    const shellDist = build(root, "shell", { "main.js": PUSH(`12598,(e)=>{e.v("arrow-icon")},23456,(e)=>{e.v(1)}`) }, ["static/chunks/main.js"]);
+    const dist = build(root, "zone", { "page.js": PUSH(`45678,(e)=>{e.v("arrow-icon")},23456,(e)=>{e.v(1)},34567,(e)=>{e.v(2)}`) }, ["static/chunks/page.js"]);
+    const result = await analyse({ dist, shellDist, known: null, outDir: path.join(root, "out"), buildKey: "0123456789abcdef", urlPrefix: "/_next/" });
+    assert.equal(result.shared.sameCode, 2);
+    assert.equal(result.shared.sameId, 1);
+    assert.deepEqual(result.shared.differ.map(({ id, knownAs }) => ({ id, knownAs })), [{ id: "45678", knownAs: ["12598"] }]);
+    assert.match(result.shared.differ[0].code, /arrow-icon/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

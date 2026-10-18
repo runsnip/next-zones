@@ -182,6 +182,11 @@ function createStaging(ctx) {
     await fs.promises.rename(temp, file);
   }
 
+  /* A refusal's sample of the shared modules under another id (zone-client.cjs): its id, the ids already known, its code. */
+  const differing = (sample) => (sample?.length
+    ? `. Under another id, for example: ${sample.map((m) => `${m.id} (known as ${m.knownAs.join(", ")}): ${JSON.stringify(m.code)}`).join("; ")}`
+    : "");
+
   const ANALYSIS = "m16";                                 // bumped when the client analysis changes (zone-client.cjs FORMAT)
   async function analyseZoneClient(staged) {
     /* A zone without App Router pages has no client code that runs in the shell's document: its Pages Router pages
@@ -203,7 +208,7 @@ function createStaging(ctx) {
       /* Most of what the zone has in common with the shell must be under the same ids, or the two were built from
          different project roots (every module named otherwise) and would share nothing. */
       if (result.shared && result.shared.sameCode >= 10 && result.shared.sameId < result.shared.sameCode / 2) {
-        throw new ZoneError(`zone "${staged.name}" ${staged.version ?? ""} was built from another project root than the shell: of the ${result.shared.sameCode} client modules it has in common with the shell, ${result.shared.sameId} are under the same ids, so it would load a second copy of each (React's contexts among them). Build the shell and the zone with next-zones build from the same workspace (it pins the root; NEXT_ZONES_ROOT sets it)`);
+        throw new ZoneError(`zone "${staged.name}" ${staged.version ?? ""} was built from another project root than the shell: of the ${result.shared.sameCode} client modules it has in common with the shell, ${result.shared.sameId} are under the same ids, so it would load a second copy of each (React's contexts among them). Build the shell and the zone with next-zones build from the same workspace (it pins the root; NEXT_ZONES_ROOT sets it), and install each package once (two versions of one package sit at two paths, and its unchanged modules get two ids)${differing(result.shared.differ)}`);
       }
       if (result.statefulConflicts?.length) {
         const list = result.statefulConflicts.slice(0, 5).map((c) => `module ${c.id} (${c.reason})`).join("; ");
