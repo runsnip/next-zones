@@ -47,6 +47,12 @@ What changed in each version of `@runsnip/next-zones` on npm. The versions follo
   its own (a dynamic page of server components only) has no entry in its manifest: it is named by its module path, as
   Next looks it up, with the files that render around it (its layouts, not-found, error, loading). A stylesheet stays
   loaded after the navigation away, as Next keeps a layout's.
+- **Zones on Next 16.3.6 and 16.3.7: the shell's stylesheets after a soft navigation back from a zone to a page that
+  returns a fragment** (`<>…</>`, or several elements; the spike's home page). The root layout's stylesheets were added
+  to a page's own assets (its second child) only when the page's element was one element: with an array, the edit
+  took the element for the assets and gave up, on every Next. 16.3.8 and 16.4.0 loaded the stylesheet anyway; 16.3.6
+  and 16.3.7 rendered the page from its prefetched segment without it. A page is now told by its shape (element,
+  assets, outlet), whatever its element.
 - **A build for Zones in a folder whose `node_modules` is linked from elsewhere**: the project root `zoneConfig` pins is
   found when the two share only the filesystem's root (a workspace in `/tmp`, its `node_modules` in `/home`). Before,
   the search for it never ended, and the build hung.

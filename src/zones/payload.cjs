@@ -199,11 +199,12 @@ const isStylesheet = (el) => Array.isArray(el) && el[0] === "$" && el[1] === "li
 const childrenOf = (node) => (Array.isArray(node) && node[0] === "$" && Array.isArray(node[3]?.children) ? node[3].children : null);
 const linksOf = (node) => { const assets = childrenOf(node)?.[0]; return Array.isArray(assets) ? assets.filter(isStylesheet) : []; };
 /* A segment's own assets (links, scripts) are its node's first child, a page's its second (Next's createComponentTree):
-   a page's first child is its element. */
+   a page is [element, assets, outlet], its element whatever the page returns (one element, a fragment's array, text,
+   null); a layout is [assets, element], or [element, assets] when it postpones. */
 function addLinks(node, links) {
   const children = childrenOf(node);
   if (!children || !links.length) return false;
-  const at = Array.isArray(children[0]) && children[0][0] === "$" ? 1 : 0;
+  const at = children.length === 3 || (Array.isArray(children[0]) && children[0][0] === "$") ? 1 : 0;
   const slot = children[at];
   if (slot != null && !(Array.isArray(slot) && slot.every((el) => Array.isArray(el) && el[0] === "$"))) return false;
   const have = new Set((slot ?? []).filter(isStylesheet).map((el) => el[3].href));

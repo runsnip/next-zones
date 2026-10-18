@@ -91,6 +91,22 @@ test("a prerendered page: the segment below the root names the root's stylesheet
   assert.equal(withRootCss(lazy, null).rscData, lazy);
 });
 
+test("a page that returns a fragment (an array of children, text among them): its assets are still its second child", () => {
+  /* The shell's home on Next 16.3: no segment between the root and the page; the page's element is an array. */
+  const root = ["$", "$1", "c", { children: [[link("/_next/static/chunks/root.css"), script], ["$", "html", null, {}]] }];
+  const home = (assets) => ["$", "$1", "c", { children: [[["$", "h1", null, {}], " ", ["$", "p", null, {}]], assets, ["$", "$L4", null, {}]] }];
+  const tree = ["", { children: ["__PAGE__", {}] }];
+  const rsc = Buffer.from(`0:${JSON.stringify({ c: [""], f: [[tree, [root, { children: [home([script]), {}, null, false] }, null, false], null, false]], b: "x" })}\n`);
+  const segments = new Map([["/__PAGE__", Buffer.from(`0:${JSON.stringify({ buildId: "x", data: [{ rsc: home([script]) }, { rsc: root }] })}\n`)]]);
+  const { rscData, segmentData } = withRootCss(rsc, segments);
+  assert.deepEqual(row0(rscData).f[0][1][1].children[0], home([link("/_next/static/chunks/root.css"), script]));
+  assert.deepEqual(row0(segmentData.get("/__PAGE__")).data[0].rsc, home([link("/_next/static/chunks/root.css"), script]));
+  /* A page that returns null, with no assets of its own. */
+  const empty = ["$", "$1", "c", { children: [null, null, null] }];
+  const bare = withRootCss(rsc, new Map([["/__PAGE__", Buffer.from(`0:${JSON.stringify({ buildId: "x", data: [{ rsc: empty }] })}\n`)]])).segmentData;
+  assert.deepEqual(row0(bare.get("/__PAGE__")).data[0].rsc[3].children, [null, [link("/_next/static/chunks/root.css")], null]);
+});
+
 test("from Next 16.4: the tree's root names its children by a Map row; the segment there names the root's stylesheet", () => {
   const root = { s: "", h: 528, d: { r: ["$", "$1", "c", { children: [[link("/_next/static/chunks/root.css"), script], ["$", "html", null, {}]] }], p: false, v: null }, c: "$Q9" };
   const layout = { s: "wide", h: 512, d: { r: ["$", "$1", "c", { children: [null, ["$", "$L7", null, {}]] }], p: false, v: null }, c: "$Qb" };
