@@ -59,6 +59,12 @@ What changed in each version of `@runsnip/next-zones` on npm. The versions follo
   took the element for the assets and gave up, on every Next. 16.3.8 and 16.4.0 loaded the stylesheet anyway; 16.3.6
   and 16.3.7 rendered the page from its prefetched segment without it. A page is now told by its shape (element,
   assets, outlet), whatever its element.
+- **Zones and `mode: "single"` on Next 16.4.0: a zone's page rendered on request hydrates.** From 16.4, Next writes
+  the runtime's registration inline in a page's document, from the build manifest's `pagesChunkGroupBootstrapParams`
+  by page; the shell's names only its own pages, so a zone's page rendered on request (a dynamic page) had none, its
+  runtime never started, and its links navigated as plain links. A zone's page, which runs in the shell's document,
+  gets the shell's registration (Zones as it reads the manifest, the link as it writes it). Prerendered pages had it
+  already.
 - **A build for Zones in a folder whose `node_modules` is linked from elsewhere**: the project root `zoneConfig` pins is
   found when the two share only the filesystem's root (a workspace in `/tmp`, its `node_modules` in `/home`). Before,
   the search for it never ended, and the build hung.

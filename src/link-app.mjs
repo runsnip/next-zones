@@ -424,6 +424,18 @@ if (notFoundZones.length) {
   writeJsManifest(path.join(server, "server-reference-manifest.js"), "__RSC_SERVER_MANIFEST", actions);
   writeJson(path.join(server, "next-font-manifest.json"), fonts);
   writeJsManifest(path.join(server, "next-font-manifest.js"), "__NEXT_FONT_MANIFEST", fonts);
+  /* Next 16.4 on: the runtime's registration written inline in a page's document, by page (build-manifest
+     pagesChunkGroupBootstrapParams). A zone's page runs in the shell's document, on the shell's runtime and root main
+     files: it gets the shell's, as Zones gives it (zones/manifests.cjs withShellBootstrap). */
+  const buildManifest = readJson(path.join(dist, "build-manifest.json"), {});
+  const bootstrap = buildManifest.pagesChunkGroupBootstrapParams;
+  if (bootstrap && typeof bootstrap === "object") {
+    const shellParams = bootstrap["/_not-found/page"] ?? Object.values(bootstrap)[0];
+    for (const page of Object.keys(appPaths)) if (page.endsWith("/page") && !bootstrap[page]) bootstrap[page] = shellParams;
+    writeJson(path.join(dist, "build-manifest.json"), buildManifest);
+    const js = path.join(server, "middleware-build-manifest.js");
+    if (fs.existsSync(js)) fs.writeFileSync(js, `globalThis.__BUILD_MANIFEST = ${JSON.stringify(buildManifest, null, 2)};\n`);
+  }
   /* Every prerendered page, the shell's and the zones': its root layout's stylesheets named below the root in its flight
      data and its segments (payload.cjs withRootCss), as Zones does when it reads one. */
   if (fs.existsSync(path.join(server, "app"))) walk(path.join(server, "app"), (rel) => {

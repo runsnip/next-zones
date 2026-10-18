@@ -127,6 +127,7 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
         loadManifestFromRelativePath(args) {
           if (args?.manifest === "prerender-manifest.json") return manifests.withZonePrerenders(mod.loadManifestFromRelativePath(args));
           if (args?.manifest === "server/server-reference-manifest.json") return manifests.withZoneActions(mod.loadManifestFromRelativePath(args));
+          if (args?.manifest === "build-manifest.json" && !pagesBuild.getStore()) return manifests.withShellBootstrap(mod.loadManifestFromRelativePath(args));
           return fromZone(mod.loadManifestFromRelativePath, args);
         },
         /* Next 16.4 on reads a route's client reference manifest with a function of its own. */
@@ -135,6 +136,7 @@ function installHooks(ctx, { manifests, rules, assets, instrumentation, next }) 
           const value = mod.loadManifest(p, ...rest);
           if (p.endsWith(`${path.sep}prerender-manifest.json`)) return manifests.withZonePrerenders(value);
           if (p.endsWith(`${path.sep}server${path.sep}app-paths-manifest.json`)) return manifests.withZoneAppPaths(value);
+          if (p === path.join(ctx.shell, ".next", "build-manifest.json")) return manifests.withShellBootstrap(value);
           /* Every page's file (requirePage): the zones' pages, merged by the switch. */
           if (ctx.mergedPagesManifest && p === shellPagesManifest) return ctx.mergedPagesManifest;
           return value;

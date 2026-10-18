@@ -117,3 +117,18 @@ test("from Next 16.4: the tree's root names its children by a Map row; the segme
   assert.deepEqual(row("0").t.t, root, "the root as it was");
   assert.equal(withRootCss(rscData, null).rscData, rscData);
 });
+
+/* manifests.cjs withShellBootstrap: from Next 16.4, a zone's page rendered on request gets the shell's registration. */
+test("the shell's build manifest names its runtime's registration for a zone's page too (Next 16.4)", () => {
+  const { createManifests } = require("../src/zones/manifests.cjs");
+  const { withShellBootstrap } = createManifests({});
+  const params = { otherChunks: ["static/chunks/a.js"], runtimeModuleIds: [1] };
+  const manifest = Object.freeze({ rootMainFiles: [], pagesChunkGroupBootstrapParams: Object.freeze({ "/page": params, "/_not-found/page": params }), chunkLoadingGlobal: "TURBOPACK" });
+  const out = withShellBootstrap(manifest);
+  assert.equal(out.pagesChunkGroupBootstrapParams["/wide/plain/page"], params);
+  assert.equal(out.pagesChunkGroupBootstrapParams["/page"], params);
+  assert.equal(out.pagesChunkGroupBootstrapParams["/_app"], undefined, "a Pages Router page is not the shell's document");
+  assert.equal(withShellBootstrap(manifest), out, "one copy per manifest");
+  const old = { rootMainFiles: [] };
+  assert.equal(withShellBootstrap(old), old, "before 16.4: as it was");
+});

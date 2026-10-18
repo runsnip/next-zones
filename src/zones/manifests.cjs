@@ -110,7 +110,28 @@ function createManifests(ctx) {
     return copy;
   }
 
-  return { withZonePrerenders, withZoneActions, withZoneAppPaths, withZoneMainChunks, withShellRootCss, withZoneLoadable };
+  /*
+   * The shell's build manifest, from Next 16.4: `pagesChunkGroupBootstrapParams` names, by page, the runtime's
+   * registration Next writes inline in the page's document (`TURBOPACK.push({otherChunks, runtimeModuleIds})`); with
+   * none, the runtime never starts and the page never hydrates. A zone's page rendered on request has no entry in the
+   * shell's: it runs in the shell's document, on the shell's runtime and root main files, so it gets the shell's (the
+   * same for every page of a build: its root main files). Read through a proxy, so a zone installed later has it too.
+   */
+  function withShellBootstrap(value) {
+    const params = value?.pagesChunkGroupBootstrapParams;
+    if (!params || typeof params !== "object") return value;
+    let copy = augmented.get(value);
+    if (!copy) {
+      const shell = params["/_not-found/page"] ?? Object.values(params)[0];
+      copy = { ...value, pagesChunkGroupBootstrapParams: new Proxy(params, {
+        get: (target, page) => (page in target || typeof page !== "string" || !page.endsWith("/page") ? target[page] : shell),
+      }) };
+      augmented.set(value, copy);
+    }
+    return copy;
+  }
+
+  return { withZonePrerenders, withZoneActions, withZoneAppPaths, withZoneMainChunks, withShellRootCss, withZoneLoadable, withShellBootstrap };
 }
 
 module.exports = { createManifests };
