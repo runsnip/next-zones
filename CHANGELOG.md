@@ -23,6 +23,11 @@ What changed in each version of `@runsnip/next-zones` on npm. The versions follo
   `Range` request gets the plain file's bytes (`206`, `If-Range`, `416`). See [public files](docs/assets.md#public-files).
 - **Zones: immutable caching for a content-addressed URL.** A public file asked for with `?h=<hash>` or `?v=<hash>` is
   served `Cache-Control: public, max-age=31536000, immutable`; the names are the zone's new `hashQuery` option.
+- **Zones: `<base>/served`, the zones serving now.** `GET <base>/served` (the `events` group, public) answers
+  `{ zones: [{ name, mount, aliases }] }`: the serving zones only, never a stopped one, one that failed at boot or an
+  image never installed, so a shell's launcher links to and prefetches only zones whose URLs answer. `ETag`-revalidated;
+  `<ZoneUpdates />` dispatches each swap on `window` as `next-zones:swap` so the page reads it again. See
+  [reading what serves](docs/updates.md#reading-what-serves).
 
 ### Fixed
 

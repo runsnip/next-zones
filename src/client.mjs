@@ -29,7 +29,15 @@ export function ZoneUpdates({ endpoint = "/_next-zones/events" }) {
     const events = new EventSource(endpoint);
     /* A Pages Router document (it has __NEXT_DATA__ and the pages router on window.next) or an App Router one. */
     const pages = typeof window !== "undefined" && window.__NEXT_DATA__ && window.next?.router;
-    const onSwap = pages ? () => navigateWithNewDocuments(pages) : () => router.refresh();
+    const refresh = pages ? () => navigateWithNewDocuments(pages) : () => router.refresh();
+    /* Also told to the page, as a "next-zones:swap" event on window ({ zone, version, state }; null after a reconnection
+       to another process): what it read of <base>/served (the zones it links to) is to be read again. */
+    const onSwap = (event) => {
+      refresh();
+      let detail = null;
+      try { detail = event?.type === "swap" ? JSON.parse(event.data) : null; } catch {}
+      window.dispatchEvent(new CustomEvent("next-zones:swap", { detail }));
+    };
     events.addEventListener("swap", onSwap);
     /* Each connection begins with what the process serves: a reconnection to another one (a deploy replaced it) that
        serves something else is a swap the tab was not told of. */

@@ -45,6 +45,22 @@ Router](pages-router.md#live-installs)).
 When a zone runs alone, or the events endpoint is not declared, there is no event stream and `<ZoneUpdates />` does
 nothing.
 
+### Reading what serves
+
+A page that links to other zones (a launcher, a list of apps) should link only to the zones serving now: a link to a
+zone that is not installed, stopped or failed at boot is a 404, and `<Link>` prefetches it as soon as it is seen.
+`GET <base>/served` (in the `events` group, public) answers `{ zones: [{ name, mount, aliases }] }`, the serving zones
+only. `<ZoneUpdates />` dispatches every swap on `window` as a `next-zones:swap` event (`detail`: `{ zone, version,
+state }`, or `null` after a reconnection to a process that serves something else), so the page reads it again:
+
+```ts
+let serving = fetch("/_next-zones/served").then((r) => r.json());
+window.addEventListener("next-zones:swap", () => { serving = fetch("/_next-zones/served").then((r) => r.json()); });
+```
+
+Where Zones does not serve the page (`next dev`, a zone running alone), the URL is the app's own 404: there is no list,
+and a page links to what it would anyway.
+
 ## Requirements
 
 - **Next.js 16.3.6, 16.3.7, 16.3.8 or 16.4.0**, App Router or [Pages Router](pages-router.md) (see [supported Next versions](zones.md#supported-next-versions)).

@@ -4,6 +4,8 @@
  * createZones({ endpoints }) does (false: none). All under one base path, "/_next-zones" unless changed:
  *
  *   events  GET  <base>/events                         swap events for <ZoneUpdates />, public; `hello` first
+ *           GET  <base>/served                         the zones serving now (name, mount, aliases), public: what a
+ *                                                      page may link to and prefetch
  *   health  GET  <base>/health                         200 once Zones serves (503 while it drains); details for an admin
  *   metrics GET  <base>/metrics                        Prometheus text, to an admin, with zoneConfig({ metrics: true })
  *   admin   GET  <base>/zones                           every zone and its state: serving, stopped, failed, available
@@ -166,6 +168,19 @@ function createEndpoints(ctx, { installer, collector, bench, debugInfo }) {
     return json(res, 200, now);
   }
 
+  /* The zones serving now, and only those: a stopped zone, one that failed at boot and an image never installed are
+     not there, so a page that lists zones (a shell's app launcher) links to none whose URLs would answer 404. Read from
+     memory (no store listing), public like the events (names and mounts are what the URLs say anyway; no versions),
+     revalidated by the fingerprint: an unchanged answer is a 304. */
+  function served(req, res) {
+    const tag = `"${fingerprint()}"`;
+    const headers = { "cache-control": "no-cache", etag: tag };
+    if (req.headers["if-none-match"] === tag) return void res.writeHead(304, headers).end();
+    const zones = [...ctx.zones.values()].map((z) => ({ name: z.name, mount: z.mount, aliases: (z.aliases ?? []).map((a) => a.source) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    res.writeHead(200, { "content-type": "application/json", ...headers }).end(JSON.stringify({ zones }));
+  }
+
   /** Answers a request for one of the declared endpoints; returns false when the request is not for them. */
   async function handle(req, res, url) {
     /* Zones' MCP server (mcp.cjs), at its own path, whatever endpoints are declared. */
@@ -185,6 +200,7 @@ function createEndpoints(ctx, { installer, collector, bench, debugInfo }) {
     if (url.pathname !== base && !url.pathname.startsWith(`${base}/`)) return false;
     const sub = url.pathname.slice(base.length);
     if (sub === "/events" && req.method === "GET" && declared.events) { events(req, res); return true; }
+    if (sub === "/served" && req.method === "GET" && declared.events) { served(req, res); return true; }
     if (sub === "/health" && req.method === "GET" && declared.health) { health(req, res); return true; }
     if (declared.admin || ctx.options.debug) { await admin(req, res, url, sub, declared); return true; }
     json(res, 404, { error: "not found" });

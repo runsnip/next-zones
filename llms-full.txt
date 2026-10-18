@@ -923,6 +923,22 @@ Router](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/pages-rou
 When a zone runs alone, or the events endpoint is not declared, there is no event stream and `<ZoneUpdates />` does
 nothing.
 
+### Reading what serves
+
+A page that links to other zones (a launcher, a list of apps) should link only to the zones serving now: a link to a
+zone that is not installed, stopped or failed at boot is a 404, and `<Link>` prefetches it as soon as it is seen.
+`GET <base>/served` (in the `events` group, public) answers `{ zones: [{ name, mount, aliases }] }`, the serving zones
+only. `<ZoneUpdates />` dispatches every swap on `window` as a `next-zones:swap` event (`detail`: `{ zone, version,
+state }`, or `null` after a reconnection to a process that serves something else), so the page reads it again:
+
+```ts
+let serving = fetch("/_next-zones/served").then((r) => r.json());
+window.addEventListener("next-zones:swap", () => { serving = fetch("/_next-zones/served").then((r) => r.json()); });
+```
+
+Where Zones does not serve the page (`next dev`, a zone running alone), the URL is the app's own 404: there is no list,
+and a page links to what it would anyway.
+
 ## Requirements
 
 - **Next.js 16.3.6, 16.3.7, 16.3.8 or 16.4.0**, App Router or [Pages Router](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/pages-router.md) (see [supported Next versions](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/zones.md#supported-next-versions)).
@@ -1062,6 +1078,7 @@ machine (a loopback address).
 | Group | Endpoint | What it does |
 |---|---|---|
 | `events` | `GET <base>/events` | The swap events [`<ZoneUpdates />`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/updates.md) listens to: only zone names and versions, after a `hello` naming what the process serves ([rolling deploys](#rolling-deploys)). Public |
+| | `GET <base>/served` | The zones serving now, and only those: 200 `{ zones: [{ name, mount, aliases }] }` (aliases' sources), sorted by name. A stopped zone, one that failed at boot and an image never installed are not listed, so a page that lists zones (a shell's app launcher) can link to and prefetch only those whose URLs answer. No versions; `ETag` from what the process serves, so an unchanged answer is a 304. Read again after each swap ([`next-zones:swap`](https://raw.githubusercontent.com/runsnip/next-zones/main/docs/updates.md#reading-what-serves)). Public |
 | `health` | `GET <base>/health` | Public: 200 `{ ok, degraded }` once Zones serves (503 `{ ok: false, draining: true }` while it [drains](#rolling-deploys)), for a supervisor such as Docker's `HEALTHCHECK`. A zone that failed at boot makes it `degraded`, not unhealthy: a restart would not fix its build. An admin also gets every zone and its state ([below](#zones-and-their-state)), the boot failures, uptime and RSS |
 | `admin` (every endpoint of the group needs the admin token) | `GET <base>/zones` | Every zone and its state: `{ zones }` ([below](#zones-and-their-state)) |
 | | `POST <base>/zones/<zone>/stop` | [Stops](#stopping-a-zone) the zone: its URLs answer 404, it stays installed. 200 `{ name, version, state, changed, ms }` |

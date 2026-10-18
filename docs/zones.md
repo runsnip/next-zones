@@ -120,6 +120,7 @@ machine (a loopback address).
 | Group | Endpoint | What it does |
 |---|---|---|
 | `events` | `GET <base>/events` | The swap events [`<ZoneUpdates />`](updates.md) listens to: only zone names and versions, after a `hello` naming what the process serves ([rolling deploys](#rolling-deploys)). Public |
+| | `GET <base>/served` | The zones serving now, and only those: 200 `{ zones: [{ name, mount, aliases }] }` (aliases' sources), sorted by name. A stopped zone, one that failed at boot and an image never installed are not listed, so a page that lists zones (a shell's app launcher) can link to and prefetch only those whose URLs answer. No versions; `ETag` from what the process serves, so an unchanged answer is a 304. Read again after each swap ([`next-zones:swap`](updates.md#reading-what-serves)). Public |
 | `health` | `GET <base>/health` | Public: 200 `{ ok, degraded }` once Zones serves (503 `{ ok: false, draining: true }` while it [drains](#rolling-deploys)), for a supervisor such as Docker's `HEALTHCHECK`. A zone that failed at boot makes it `degraded`, not unhealthy: a restart would not fix its build. An admin also gets every zone and its state ([below](#zones-and-their-state)), the boot failures, uptime and RSS |
 | `admin` (every endpoint of the group needs the admin token) | `GET <base>/zones` | Every zone and its state: `{ zones }` ([below](#zones-and-their-state)) |
 | | `POST <base>/zones/<zone>/stop` | [Stops](#stopping-a-zone) the zone: its URLs answer 404, it stays installed. 200 `{ name, version, state, changed, ms }` |
