@@ -77,3 +77,25 @@ test("modules the shell has under other ids are counted and a sample of them nam
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a module an earlier zone holds under a wider id is the same module (Admin then Docx): aliased, not another root", { skip }, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nz-earlier-"));
+  fs.symlinkSync(SPIKE_MODULES, path.join(root, "node_modules"));
+  try {
+    const shellDist = build(root, "shell", { "main.js": PUSH(`12598,(e)=>{e.v("react-ish")}`) }, ["static/chunks/main.js"]);
+    /* A large zone, installed first: six-digit ids for a package the shell does not have. */
+    const big = build(root, "big", { "page.js": PUSH(`691096,(e)=>{e.v("pdf-lexer")},992719,(e)=>{e.v("numfmt")},900003,(e)=>{e.v(3)}`) }, ["static/chunks/page.js"]);
+    const first = await analyse({ dist: big, shellDist, known: null, outDir: path.join(root, "out-big"), buildKey: "0123456789abcdef", urlPrefix: "/_next/" });
+    const known = {};
+    for (const [id, hs] of Object.entries({ ...first.shellModules })) known[id] = hs;
+    for (const [id, hs] of Object.entries(first.zoneModules)) known[id] = [...new Set([...(known[id] ?? []), ...hs])];
+    /* A smaller zone after it, with the same package: five-digit ids, the wider ones' last digits. */
+    const small = build(root, "small", { "page.js": PUSH(`91096,(e)=>{e.v("pdf-lexer")},92719,(e)=>{e.v("numfmt")},55555,(e)=>{e.v(5)}`) }, ["static/chunks/page.js"]);
+    const second = await analyse({ dist: small, shellDist, known, outDir: path.join(root, "out-small"), buildKey: "fedcba9876543210", urlPrefix: "/_next/" });
+    assert.equal(second.idMap["91096"], 691096);
+    assert.equal(second.idMap["92719"], 992719);
+    assert.deepEqual({ sameCode: second.shared.sameCode, sameId: second.shared.sameId, differ: second.shared.differ }, { sameCode: 2, sameId: 2, differ: [] });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
