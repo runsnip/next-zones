@@ -248,24 +248,14 @@ async function serve() {
      connect timeout); while it lingers, a refusal marks it down there (max_fails), so the proxy has stopped sending it
      anything by the time it goes. */
   const drainLinger = wholeNumber(flag("drain-linger", process.env.NEXT_ZONES_DRAIN_LINGER_MS ?? "0"), "--drain-linger");
-  let server = null, listening = false, stopping = false;
-  for (const signal of ["SIGTERM", "SIGINT"]) {
-    process.on(signal, () => {
-      if (stopping || !listening) process.exit(listening ? 1 : 0);
-      stopping = true;
-      console.log(`next-zones: ${signal}, draining (at most ${drainTimeout} ms)`);
-      server.drain({ timeoutMs: drainTimeout }).then(
-        (r) => {
-          console.log(`next-zones: drained in ${r.ms} ms (${r.streams} event streams ended${r.timedOut ? ", requests still in flight closed" : ""})${drainLinger ? `, exiting in ${drainLinger} ms` : ""}`);
-          setTimeout(() => process.exit(0), drainLinger);
-        },
-        (error) => { console.error(error); process.exit(1); });
-    });
-  }
+  const { stopOnSignal } = createRequire(import.meta.url)("./zones/drain.cjs");
+  let server = null;
+  const stop = stopOnSignal({ drain: (o) => server.drain(o), timeoutMs: drainTimeout, lingerMs: drainLinger });
+  for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => stop.signal(signal));
   const { createZones } = createRequire(import.meta.url)("./zones/index.cjs");
   server = createZones(options);
   await server.listen(port, host);
-  listening = true;
+  stop.listening();
   console.log(`next-zones: Zones on http://${host}:${port}, shell ${path.resolve(shell)}`);
   for (const [zone, z] of Object.entries(server.zones())) console.log(`  ${zone} ${z.version ?? z.versions?.join(", ")} ${z.state}`);
 }

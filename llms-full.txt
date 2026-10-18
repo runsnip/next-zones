@@ -1220,11 +1220,19 @@ that does match.
 A live install changes a zone inside one process. A deploy of a new image replaces the process, and two things make
 that invisible to users: a proxy in front of more than one Zones for the time of the swap, and a stop that drains.
 
-- **A stop drains.** On `SIGTERM` or `SIGINT`, `next-zones serve` (and `start`) stops taking connections, answers the
-  requests it has with `Connection: close`, answers `<base>/health` with 503, ends the open tabs' event streams with
-  `retry: 1000`, then exits 0. `--drain-timeout <ms>` (`NEXT_ZONES_DRAIN_TIMEOUT_MS`, 25 000 by default) bounds the
-  wait; requests still running then have their connections closed. Give the supervisor a longer grace than that
-  (compose: `stop_grace_period: 30s`), or it kills the process mid-drain. From code: `await zones.drain({ timeoutMs })`.
+- **A stop drains.** On `SIGTERM` or `SIGINT`, `next-zones serve` (and `start`) answers `<base>/health` with 503,
+  ends the open tabs' event streams with `retry: 1000`, stops taking connections, answers the requests it has, then
+  exits 0. It does not lose a request a proxy has sent, which matters for a POST: a proxy does not send one again
+  once sent. It stops listening only at a quiet turn of its event loop (at most 5 s after the signal: a loop busy all
+  that time still leaves the window of its last turn), once it has accepted the connections the kernel had queued
+  for it: closing a listener resets those, requests written on them included. Until then its answers keep their
+  connections alive, so the proxy reuses them rather than opening new ones; from then on they close them
+  (`Connection: close`), and the proxy's next new connection is refused, so it stops using this process. It never
+  closes a connection the proxy keeps alive (the proxy may be writing on it that moment): one left idle closes by the
+  keep-alive timeout (below), so the drain takes up to that long behind a proxy. `--drain-timeout <ms>`
+  (`NEXT_ZONES_DRAIN_TIMEOUT_MS`, 25 000 by default) bounds the wait; requests still running then have their
+  connections closed. Give the supervisor a longer grace than that (compose: `stop_grace_period: 30s`), or it kills
+  the process mid-drain. From code: `await zones.drain({ timeoutMs })`.
 - **Mark it down before it goes.** In a container the exit takes the address away: a connection a proxy opens to it
   after that is not refused but lost, and waits out the proxy's connect timeout; nginx then cannot send the request to
   the other server if it has looked the name up again meanwhile (504). `--drain-linger <ms>`
@@ -1233,10 +1241,14 @@ that invisible to users: a proxy in front of more than one Zones for the time of
   (longer than nginx takes to drop the address), `--drain-linger 2000`, `proxy_connect_timeout 1s`.
 - **Marking has a cost: wait it out.** A Zones refuses connections until it listens, so the proxy marks a booting one
   down too, and it stays down for `fail_timeout` after. Stop the other one only once that has passed (healthy, then
-  `fail_timeout` + 1 s), or the proxy has no live server.
+  `fail_timeout` + 1 s), or the proxy has no live server. nginx then sends a server it marked down one request, and
+  leaves it out until that one has succeeded: send the new process a request through the proxy, and stop the other
+  only once it has answered (a first request to a cold route can take seconds, and every request meanwhile finds no
+  live server).
 - **Close idle connections from the proxy's side first.** Node closes an idle kept-alive connection after 5 s
   (`keepAliveTimeout`); a proxy that keeps it longer may write a request on a connection being closed: a reset, which
-  also marks that server down. nginx: `keepalive_timeout 4s` in the `upstream`.
+  also marks that server down. nginx: `keepalive_timeout 4s` in the `upstream`. A drain relies on it too: it ends
+  once the proxy has closed the connections it kept.
 - **The proxy retries what is safe.** A connection the leaving process refuses was never sent, so a proxy may send any
   request to the other process; a request that failed after it was sent is retried only when it is idempotent. nginx:
   the processes as servers of one `upstream`, `proxy_next_upstream error timeout http_502 http_503` (nginx never sends

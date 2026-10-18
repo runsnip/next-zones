@@ -41,7 +41,9 @@ function createContext(options) {
     fsCheckers: new Set(),            // the router server's file-system checks
     lrus: new Set(),                  // every LRU Next creates (cached misses live there)
     listeners: new Set(),             // open tabs listening to <base>/events
-    draining: false,                  // drain() began: no keep-alive, health answers 503, no new connections
+    draining: false,                  // drain() began: health answers 503, tabs' event streams sent away (drain.cjs)
+    closeConnections: false,          // the drain stopped listening: every answer closes its connection
+    inflight: new Set(),              // responses not yet finished (drain.cjs: answered with Connection: close)
     policy: options.policy ?? {},     // the instrumentation policy
 
     /* Benchmark only: synthetic pages added to the shell's manifest, to measure at a real app's size. */

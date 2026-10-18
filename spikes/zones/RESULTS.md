@@ -1182,3 +1182,47 @@ written again (the runtime chunk each), the same 300 and 298 remapped ids.
 **Check:** `asyncchunks.mjs`. The `wide` zone's page has a button whose `import()` loads a card (JSX, the shell's
 context): the card renders with "context root" after a soft navigation and on a direct load, with no page error, and
 no chunk is fetched under its old name once it has a new one. On the previous code it fails with the error above.
+
+## A drain that loses no request (rolling deploys behind nginx)
+
+**Check:** `rollout.mjs`. Zones processes of its own, from the CLI (`next-zones serve`, blog 1 on one, blog 2 on the
+other, `--drain-linger 1500`), each counting what it is sent (`rollout-count.cjs`, preloaded). Alone: a POST whose
+body is still arriving as SIGTERM comes. Behind nginx 1.29 in Docker (a container of its own, the `upstream` and
+`proxy_next_upstream` directives of the RunSnip deploy): POSTs eight at a time without pause while the first Zones
+drains and exits; and a Chromium tab with `<ZoneUpdates />` on blog 1 through nginx.
+
+**Found**, one cause after another (Apple M1, Node 24.16.0, Next 16.3.6, host load 40–107 from other work):
+- An answer in flight as the drain began said `Connection: keep-alive`: `shouldKeepAlive` was set as a request came,
+  and Node reads it as it writes the headers. `<base>/events` named `connection: keep-alive` itself, which overrides it.
+- The drain closed the idle kept-alive connections (http.Server's `close()`, then `closeIdleConnections()` every
+  50 ms): nginx writing a request on one that moment got "upstream prematurely closed connection", and a POST is not
+  sent again. 4 of 67 POSTs answered 502, never received.
+- Closing the listener resets the connections the kernel has set up and Node has not accepted yet; a busy turn of the
+  event loop lets them queue. Measured alone (`net.Server` blocked 400 ms, five POSTs connecting meanwhile): closed at
+  once, 5 of 5 reset after the request was written; one `setImmediate` later, 4 of 5; at the first quiet turn, 0.
+  Through nginx, closed at once: 8 of 2,215 POSTs lost, in 3 of 8 deploys.
+- Closing at a quiet turn, bound 1 s: 4 of 1,418 lost in 1 of 8 (a cold route at load 65 kept the loop busy past the
+  bound). Bound 5 s: 5 of 1,699 in 1 of 8, at load 98: the drain answered with `Connection: close` while it waited for
+  quiet, so nginx opened a new connection for every next request, and they kept queuing.
+- nginx, not Zones: a server marked down (the second Zones, while it booted) is sent one request after
+  `fail_timeout`, and left out until that one has succeeded. A cold route at load 50 took seconds; the first Zones
+  refused meanwhile, and 17 POSTs found no live server (502, never sent).
+
+**Fix** (`drain.cjs`): the drain answers health with 503 and ends the tabs' streams at once; it stops listening
+(`net.Server`'s close) at the first turn of the event loop that accepted no connection and came round in under 2 ms,
+at most 5 s on, its answers keeping their connections alive until then; from then on every answer, and every one in
+flight whose headers are not sent, closes its connection; a connection kept alive is never closed under the proxy,
+and closes by its keep-alive timeout (nginx's 4 s comes first). The check warms the second Zones through nginx
+before stopping the first (a step the deploy needs too).
+
+**Measured** after, 8 deploys (load 43–107): 2,325 POSTs, every one answered 200 once and received once, none
+received twice, none resent by nginx, no "no live upstreams"; 2–6 refusals per deploy, each sent on to the other Zones.
+The leaving Zones exited 0, 5.5–6.4 s after SIGTERM (the drain waits for nginx to close its idle connections, then
+lingers 1.5 s). Alone, the POST in flight was answered 200 with `Connection: close`, received once, and a new
+connection was refused meanwhile. Every tab went from "zone blog v1" to "zone blog v2" in the same document after its
+stream was ended and reconnected through nginx (two event streams each). `test/drain.test.mjs` covers each part on a
+plain HTTP server; each new assertion fails on the previous drain.
+
+**What is left:** a loop busy for the whole 5 s still leaves the window of its last turn: the kernel completes a
+connection's handshake before the process accepts it, and Node gives no way to accept what is queued and close in one
+step.

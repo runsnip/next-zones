@@ -8,12 +8,18 @@ What changed in each version of `@runsnip/next-zones` on npm. The versions follo
 ### Added
 
 - **Zones: a stop drains.** `next-zones serve` and `start` drain on `SIGTERM` or `SIGINT` (`docker stop`, a rolling
-  deploy): no new connection is taken, the requests in flight are answered with `Connection: close`, `<base>/health`
-  answers `503`, and the open tabs' event streams end with `retry: 1000`, so they reconnect through the proxy to a Zones
-  that stays; then it exits 0. `--drain-timeout` (or `NEXT_ZONES_DRAIN_TIMEOUT_MS`, 25 s by default) bounds the wait.
-  `zones.drain({ timeoutMs })` does the same from code; `zones.close()` is it. Before, a stop cut what was in flight.
-  `--drain-linger` (`NEXT_ZONES_DRAIN_LINGER_MS`, 0 by default) keeps it refusing connections a while before it exits,
-  so a proxy balancing over several Zones has marked it down before its address goes.
+  deploy): `<base>/health` answers `503` and the open tabs' event streams end with `retry: 1000`, so they reconnect
+  through the proxy to a Zones that stays; it stops listening, answers the requests in flight, with `Connection:
+  close` from then on, and exits 0. It does not lose a request a proxy has sent (a proxy does not send a POST
+  again): it stops listening at the first quiet turn of its event loop, at most 5 s on, once it has accepted the
+  connections the kernel had queued, which closing the listener would reset; and it closes no connection a proxy
+  keeps alive (a request still sent on one is answered; one left idle closes by its keep-alive timeout, Node's 5 s,
+  which nginx's `keepalive_timeout 4s` undercuts, so a drain behind a proxy takes up to that long). Only an event
+  loop busy for all of those 5 s still leaves the window of its last turn. `--drain-timeout` (or
+  `NEXT_ZONES_DRAIN_TIMEOUT_MS`, 25 s by default) bounds the wait. `zones.drain({ timeoutMs })` does the same from
+  code; `zones.close()` is it. Before, a stop cut what was in flight. `--drain-linger` (`NEXT_ZONES_DRAIN_LINGER_MS`,
+  0 by default) keeps it refusing connections a while before it exits, so a proxy balancing over several Zones has
+  marked it down before its address goes.
 - **Zones: a tab learns that a deploy replaced the process.** Every `<base>/events` stream begins with a `hello` event
   naming what the process serves (the shell's build, each zone's version and build); `<ZoneUpdates />` refreshes, as
   on a swap, when it reconnects to a process serving something else. See [rolling deploys](docs/zones.md#rolling-deploys).

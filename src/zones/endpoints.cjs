@@ -136,7 +136,8 @@ function createEndpoints(ctx, { installer, collector, bench, debugInfo }) {
   }
 
   function events(req, res) {
-    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache, no-transform", connection: "keep-alive" });
+    /* No Connection header while draining: an explicit keep-alive would override the drain's close (drain.cjs). */
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache, no-transform", ...(ctx.draining ? {} : { connection: "keep-alive" }) });
     res.write(": next-zones\n\n");
     /* Leaving (drain): the tab is told to come back in a second, to a process that stays. */
     if (ctx.draining) return void res.end("retry: 1000\n\n");
