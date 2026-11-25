@@ -86,9 +86,23 @@ function runNode(file, args, cwd) {
 }
 
 /**
+ * Removes a zone's `.next/dev/types`: `next dev`'s own types, which the zone's tsconfig includes. Next 16.3.8's dev
+ * server writes `validator.ts` there again without truncating it, so a shorter list of routes (dev lists only those
+ * compiled) over a longer one leaves the old tail behind and tsc reports syntax errors in a file nobody wrote
+ * (2026-11-22, admin: 5 errors). What tsc needs is in `.next/types`, which `next typegen` writes whole; a running
+ * dev server writes its folder again as it compiles. Returns whether there was one.
+ */
+export function clearDevTypes(zoneDir) {
+  const dir = path.join(zoneDir, ".next", "dev", "types");
+  if (!fs.existsSync(dir)) return false;
+  fs.rmSync(dir, { recursive: true, force: true });
+  return true;
+}
+
+/**
  * The type check `next build` runs, for one zone with its own tsconfig: `next typegen`, then `tsc --noEmit`, both
- * resolved from the zone. { ran: false } when the zone has no tsconfig or TypeScript is not installed.
- * Used by doctor.
+ * resolved from the zone, `next dev`'s types cleared first (clearDevTypes). { ran: false } when the zone has no
+ * tsconfig or TypeScript is not installed. Used by doctor.
  */
 export async function checkZoneTypes(z) {
   const req = createRequire(path.join(z.dir, "package.json"));
@@ -98,6 +112,7 @@ export async function checkZoneTypes(z) {
   const tscBin = tsPackage && JSON.parse(fs.readFileSync(tsPackage, "utf8")).bin?.tsc;
   const tsc = tscBin && path.join(path.dirname(tsPackage), tscBin), next = resolve("next/dist/bin/next");
   if (!fs.existsSync(path.join(z.dir, "tsconfig.json")) || !tsc || !next) return { ran: false };
+  clearDevTypes(z.dir);
   await runNode(next, ["typegen"], z.dir);
   const { code, out } = await runNode(tsc, ["--noEmit", "-p", "."], z.dir);
   return { ran: true, code, out, errors: out.split("\n").filter((l) => /error TS\d+/.test(l)) };
